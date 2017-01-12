@@ -1,0 +1,591 @@
+---
+title: "Lin41 Analysis"
+author: "Micah Gearhart"
+date: "1/6/2017"
+output:
+  md_document:
+    variant: markdown_github
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r libraries,eval=T,results='hide',message=FALSE,warning=FALSE}
+library("biomaRt")
+library("GenomicFeatures")
+library("Rsamtools")
+
+library("GenomicFeatures")
+library("Rsamtools")
+library("GenomicAlignments")
+library("BiocParallel")
+library("DESeq2")
+library("genefilter")
+library("pheatmap")
+library("SRAdb")
+
+library("ggplot2")
+library("dplyr")
+library("tidyr")
+library("magrittr")
+library("RColorBrewer")
+library("gridExtra")
+
+(ts<-format(Sys.time(), "%a_%b_%d_%Y_%H%M"))
+cbPalette <- c("#999999", "#E69F00", "#56B4E9", "#009E73", "#F0E442", "#0072B2", "#D55E00", "#CC79A7")
+```
+
+```{r}
+ensembl_82 = useMart(biomart="ENSEMBL_MART_ENSEMBL", host="sep2015.archive.ensembl.org", path="/biomart/martservice",dataset="celegans_gene_ensembl")
+txdb<-makeTxDbFromBiomart(biomart="ENSEMBL_MART_ENSEMBL",host="sep2015.archive.ensembl.org",dataset="celegans_gene_ensembl")
+ens82<-exonsBy(txdb,by="gene")
+type82<-getBM(filters="ensembl_gene_id",values=names(ens82), attributes=c("ensembl_gene_id","transcript_biotype"), mart=ensembl_82)
+table(type82$transcript_biotype)
+save(ens82,type82,file="ens82.rdata")
+
+ensembl_87 = useMart(biomart="ENSEMBL_MART_ENSEMBL", host="www.ensembl.org", path="/biomart/martservice",dataset="celegans_gene_ensembl")
+txdb<-makeTxDbFromBiomart(biomart="ENSEMBL_MART_ENSEMBL",host="www.ensembl.org",dataset="celegans_gene_ensembl")
+ens87<-exonsBy(txdb,by="gene")
+type87<-getBM(filters="ensembl_gene_id",values=names(ens87), attributes=c("ensembl_gene_id","transcript_biotype"), mart=ensembl_87)
+table(type87$transcript_biotype)
+save(ens87,type87,file="ens87.rdata")
+```
+
+```{r}
+load("ens87.rdata")
+(fls <- list.files(".", pattern=".bam$",full=TRUE))
+fls <- fls[!grepl("PE",fls)]
+bamlst <- BamFileList(fls)
+detectCores()
+register(MulticoreParam(workers=detectCores()))
+genehits82 <- summarizeOverlaps(ens82,bamlst,mode="Union",singleEnd=TRUE,ignore.strand=TRUE)
+#genehits <- summarizeOverlaps(ens87,bamlst,mode="Union",singleEnd=TRUE,ignore.strand=TRUE)
+head(assays(genehits82)$counts)
+apply(assays(genehits82)$counts,2,sum)
+save(genehits82,file= "genehits_ens82_WBcel235_010617.rdata")
+save(genehits,file= "genehits_ens87_WBcel235_010617.rdata")
+
+```
+
+# Do some QC on read counts
+```{r}
+#load("genehits_ens82_WBcel235_111815.rdata")
+#load("genehits_ens82_WBcel235_112515.rdata")
+load("genehits_ens87_WBcel235_010617.rdata")
+#head(temp<-as.data.frame(assays(genehits)$counts))
+head(temp<-as.data.frame(assays(genehits82)$counts))
+
+summary(idx<-match(rownames(temp),type82$ensembl_gene_id))
+temp$biotype<-type82[idx,"transcript_biotype"]
+head(temp)
+
+colnames(temp)<-sapply(strsplit(colnames(temp),"_"),function(x) x[1]) %>%
+  gsub("2566","OMA-1_",.) %>% gsub("3923","LIN-41_",.) %>% gsub("IP4","OMA-1_042310",.)
+
+colors<-c("#cbc9e2","#9e9ac8","#6a51a3",
+          "#fdbe85","#fd8d3c","#d94701",
+          "#56B4E9", "#009E73","#F0E442", "#0072B2",
+          "black","red","green")
+
+gather(temp,sample,counts,-biotype) %>%
+  group_by(sample,biotype) %>%
+  summarize(countSum=sum(counts)) %>%
+  #filter(biotype!="rRNA") %>%
+  #filter(biotype!="protein_coding") %>%
+  #filter(biotype!="pseudogene") %>%
+  ggplot(aes(x=sample,y=countSum,fill=biotype)) +
+  scale_fill_manual(values=rev(colors),guide = guide_legend(reverse=TRUE)) +
+  geom_bar(stat="identity") + theme_classic() + theme(axis.text.x = element_text(angle = 90,  hjust = 0)) 
+```
+
+```{r}
+apply(assays(genehits82)$counts,2,sum)
+temp<-as.data.frame(log2((assays(genehits82)$counts)+1))
+rownames(temp[rowMeans(temp)>19,])
+#View(biomaRt::listAttributes(ensembl_82))
+
+getBM(filters="ensembl_gene_id",values=rownames(temp[rowMeans(temp)>19,]), attributes=c("ensembl_gene_id","transcript_biotype"), mart=ensembl_82)
+type<-getBM(filters="ensembl_gene_id",values=rownames(genehits), attributes=c("ensembl_gene_id","transcript_biotype"), mart=ensembl_82)
+table(type$transcript_biotype)
+
+idx<-match(rownames(genehits),type$ensembl_gene_id)
+head(idx)
+genehits2<-genehits[type[idx,]$transcript_biotype != "rRNA",]
+dim(genehits2)
+cds<-DESeqDataSet(genehits82,design=~1)
+#colnames(cds)<-sapply(strsplit(colnames(cds),"_"),function(x) x[1])
+file_names<-colnames(cds)
+colnames(cds)<-sapply(strsplit(colnames(cds),"_"),function(x) x[1]) %>%
+  gsub("2566","OMA-1_",.) %>% gsub("3923","LIN-41_",.) %>% gsub("IP4","OMA-1_042310",.)
+
+cds$tag<-as.factor(c("OMA-1","OMA-1","LysRZ","Lys","LIN-41","LIN-41","LysRZ","Lys","OMA-1_042310"))
+cds$filename<-file_names
+design(cds)<-(~tag)
+colnames(cds)
+
+#get normalization factors for cds
+plotPCA( DESeqTransform( cds ),intgroup="tag")+
+  ggtitle("Greenstein RNP Purification") + theme_bw()
+cds<-DESeq(cds)
+colData(cds)
+round(colData(cds)$sizeFactor)
+x<-colData(cds)
+save(x,file="/mnt/smb/micah/greenste_coldata.rdata")
+
+#subset samples we are working with
+cds2<-cds[,c(1,2,3,5,6,7)]
+
+plotPCA( DESeqTransform( cds2 ),intgroup="tag")+
+  ggtitle("Greenstein RNP Purification") + theme_bw()
+
+cds2$tag <- droplevels(cds2$tag)
+cds2<-DESeq(cds2)
+plotMA(cds2,ylim=c(-8,8))
+
+res<-results(cds2,lfcThreshold=2,contrast=c("tag","OMA-1","LysRZ"))
+res<-as.data.frame(res)
+res<-res[!is.na(res$padj),]
+res<-res[abs(res$log2FoldChange) > 2,]
+dim(res) #1190
+head(res<-res[with(res,order(padj)),])
+
+
+```
+
+```{r}
+attrib<-listAttributes(ensembl_82)
+attrib[grep("Symbol",attrib[,2]),]
+head(annotations<-getBM(filters="ensembl_gene_id",values=names(ens82), attributes=c("ensembl_gene_id","wikigene_name","transcript_biotype","external_gene_name"), mart=ensembl_82))
+
+getBM(filters="ensembl_gene_id",values="WBGene00017498",attributes=c("ensembl_gene_id","wikigene_name","external_gene_name"),mart=ensembl_82)
+
+idx<-match(rownames(res),annotations$ensembl_gene_id)
+
+
+
+res$name<-annotations[idx,"wikigene_name"]
+res$type<-annotations[idx,"transcript_biotype"]
+head(res,20)
+
+
+write.csv(res,file="RNP_purification_112018.csv",quote=F)
+```
+
+```{r}
+res<-results(cds2,lfcThreshold=2,contrast=c("tag","OMA-1","LysRZ"))
+res2<-results(cds2,lfcThreshold=2,contrast=c("tag","LIN-41","LysRZ"))
+dim(res2)
+
+#get normalized counts for 042310 Oma-1 sample
+cds<-DESeq(cds)
+cds_counts<-counts(cds,normalized=TRUE)
+head(oma1_042310<-log2(cds_counts[,9]+1)-0.5*log2(cds_counts[,3]+1)-0.5*log2(cds_counts[,7]+1))
+
+head(logFCs<-cbind(oma1_042310,res$log2FoldChange,res2$log2FoldChange))
+colnames(logFCs)<-c("Oma-1 042310","Oma-1 IP","Lin-41 IP")
+plot(logFCs[,2],logFCs[,3],cex=0.5,pch=16,xlab="Oma-1",ylab="Lin-41",
+     main="Enrichment Relative to Ribozero Lysate")
+plot(logFCs[,2],logFCs[,1],cex=0.5,pch=16,xlab="Oma-1",ylab="Oma-1 042310",
+     main="Enrichment Relative to Ribozero Lysate")
+library(genefilter)
+library(pheatmap)
+
+#remove the NAs
+temp<-as.data.frame(logFCs[!(is.na(logFCs[,2]) | is.na(logFCs[,3])),])
+dim(temp)
+dim(temp<-temp[rowVars(temp)>6.5,])
+idx<-match(rownames(temp),annotations$ensembl_gene_id)
+temp$name<-annotations[idx,]$external_gene_name
+pheatmap(temp[,1:3],labels_row=annotations[idx,]$external_gene_name)
+
+temp<-as.data.frame(logFCs[!(is.na(logFCs[,2]) | is.na(logFCs[,3])),])
+dim(temp<-temp[temp[,2]>4 | temp[,3] > 4,])
+pheatmap(temp[,1:3],show_rownames=F)
+
+#output
+dim(temp<-as.data.frame(logFCs[!(is.na(logFCs[,2]) | is.na(logFCs[,3])),]))
+idx<-match(rownames(temp),annotations$ensembl_gene_id)
+temp$name<-annotations[idx,]$external_gene_name
+#dim(temp<-temp[temp[,2]>4 | temp[,3] > 4,])
+head(temp)
+colnames(temp)<-c("a","b","c","d")
+temp<-temp[with(temp,order(-c)),]
+colnames(temp)<-c("Oma-1 Spike et al, 2014a","Oma-1 IP", "Lin-41 IP", "Gene Name")
+head(temp)
+dim(temp)
+write.csv(temp,file="enrichment_relative_to_LysateRZ_112715.csv",quote=F)
+```
+
+##100216
+```{r}
+#temp<-read.csv("enrichments_fpkms_112715 - Original Enrichment Relative to LysateRZ.csv",stringsAsFactors = F)
+#plot(temp$Oma.1.IP,temp$Lin.41.IP,cex=0.5,pch=16,xlab="Oma-1",ylab="Lin-41",
+#     main="Enrichment Relative to Ribozero Lysate")
+#smoothScatter(temp$Oma.1.IP,temp$Lin.41.IP,cex=0.5,pch=16,xlab="Oma-1",ylab="Lin-41",
+#     main="Enrichment Relative to Ribozero Lysate")
+
+plot(temp$`Oma-1 IP`,temp$`Lin-41 IP`,cex=0.5,pch=16,xlab="Oma-1",ylab="Lin-41",
+     main="Enrichment Relative to Ribozero Lysate")
+smoothScatter(temp$`Oma-1 IP`,temp$`Lin-41 IP`,cex=0.5,pch=16,xlab="Oma-1",ylab="Lin-41",
+     main="Enrichment Relative to Ribozero Lysate")
+
+
+Lab.palette <- colorRampPalette(c("white", "orange", "red"), space = "Lab")
+#jpeg("oma1_vs_lin41_scatter.jpg",width=600,height=600,type="cairo")
+#svglite("testplot.svg",width=8,height=8)
+i.s<-smoothScatter(temp$`Oma-1 IP`,temp$`Lin-41 IP`, colramp = Lab.palette,
+                     ## pch=NA: do not draw them
+                     xlab=("Log2 Oma-1 Enrichment"),
+                     ylab=("Log2 Lin-41 Enrichment"),
+                     nrpoints = 100, ret.selection=TRUE)
+#identify(temp$Oma.1.IP,temp$Lin.41.IP, labels=temp$Gene.Name)
+gene_list<-c("spn-4","cdc-25.3","lin-29","smg-6","zif-1","rnp-1")
+for ( g in gene_list ){
+  x<-temp[grep(g,temp$'Gene Name'),'Oma-1 IP']
+  y<-temp[grep(g,temp$'Gene Name'),'Lin-41 IP']
+  print(x)
+  print(y)
+  print(g)
+  text(x,y,g)
+  }
+abline(h=2,col="red")
+abline(v=2,col="red")
+dev.off()
+abline(a=2,b=1,col="red")
+abline(a=-2,b=1,col="red")
+## label the 20 very lowest-density points,the "outliers" (with obs.number):
+i.20 <- i.s[1:20]
+text(x[i.20,], labels = i.20, cex= 0.75)
+
+
+#meanSdPlot from kernSmooth::meanSdme
+
+mydata <- data.frame(x=exp(rnorm(10000)), y=exp(rnorm(10000)))
+
+ggplot(temp, aes(x=Oma.1.IP, y=Lin.41.IP)) +
+   geom_point(size=0.5) +
+   stat_density2d(aes(alpha=..density.., fill=..density..), geom="tile", contour=FALSE) + theme_bw()
+
+ggplot(temp, aes(x=`Oma-1 IP`, y=`Lin-41 IP`)) + geom_point(size=0.5) +
+  stat_density2d(geom="tile", aes(fill=..density..^0.15, alpha=1), contour=FALSE) +
+  stat_density2d(geom="tile", aes(fill=..density..^0.15,  alpha=ifelse(..density..^0.15<0.4,0,1)), contour=FALSE) +
+  scale_fill_gradientn(colours = colorRampPalette(c("white", blues9))(256)) + theme_bw()
+```
+
+
+
+
+"Mon Dec 14 13:55:35 2015"
+```{r}
+system("wget 'http://trace.ncbi.nlm.nih.gov/Traces/sra/sra.cgi?save=efetch&rettype=runinfo&db=sra&term=SRP041461' -O sra.csv")
+system("wget 'http://trace.ncbi.nlm.nih.gov/Traces/sra/sra.cgi?save=efetch&rettype=runinfo&db=sra&term=SRX527966' -O sra.csv")
+View(sra<-read.csv("sra.csv",stringsAsFactors=F))
+sqlfile<-"/mnt/gcd/sradb/SRAmetadb.sqlite"
+if(!file.exists(sqlfile)) sqlfile <<- getSRAdbFile()
+sra_con <- dbConnect(SQLite(),sqlfile)
+conversion <- sraConvert('SRP041461', sra_con = sra_con )
+samples<-unique(conversion$experiment)
+dbListFields(sra_con,"experiment")
+sample_names<-list()
+#dbGetQuery(sra_con,paste0("select title from experiment where experiment_accession = 'SRX527966'"))
+
+for (i in 1:length(samples)) {
+  x<- dbGetQuery(sra_con,paste0("select title from experiment where experiment_accession = '",samples[i],"'"))
+  sample_names[[samples[i]]]<-sapply(strsplit(x[1,1],":|;"),function(x) x[2])
+}
+
+for (i in samples) {
+  x<-conversion[grep(i,conversion$experiment),"run"]
+  print(paste0("samtools merge ", i,".bam ", x[1],".bam ",x[2],".bam ",x[3],".bam ",x[4],".bam "))
+}
+
+dbGetQuery(sra_con,paste0("select title from experiment where experiment_accession = 'SRX527966'"))
+```
+
+```{r}
+#Quantitate reads in all the merged SRX files (4 SRR files per SRX file)
+(fls <- list.files("../kimble", pattern=glob2rx("SRX*.bam"),full=TRUE))
+bamlst <- BamFileList(fls)
+detectCores()
+register(MulticoreParam(workers=detectCores()))
+kimble82 <- summarizeOverlaps(ens82,bamlst,mode="Union",singleEnd=TRUE,ignore.strand=TRUE)
+save(kimble82,file="kimble_ens82_WBcel235_011017.rdata")
+load("./kimble_ens82_WBcel235_011017.rdata")
+kimble<-DESeqDataSet(kimble82,design=~1)
+file_names<-colnames(kimble)
+colnames(kimble)<-gsub("\\.bam","",file_names)
+kimble$title<-unlist(sample_names)[colnames(kimble)]
+kimble$filename<-file_names
+kimble$sex<-factor(substr(kimble$title,2,4))
+#sperm [fem-3(q96)] or oocytes [fog-2(q71)]
+design(kimble)<-(~sex)
+colData(kimble)
+plotPCA( DESeqTransform( kimble ),intgroup="sex")+
+  ggtitle("Kimble Data") + theme_bw()
+kimble<-DESeq(kimble)
+plotMA(kimble)
+
+res<-results(kimble,lfcThreshold=1,contrast=c("sex","q96","q71"))
+res<-as.data.frame(res)
+res<-res[!is.na(res$padj),]
+#res<-res[abs(res$log2FoldChange) > 2,]
+#dim(res) #1190
+head(res<-res[with(res,order(-log2FoldChange)),])
+
+idx<-match(rownames(res),annotations$ensembl_gene_id)
+res$name<-annotations[idx,"wikigene_name"]
+res$external_name<-annotations[idx,"external_gene_name"]
+res$type<-annotations[idx,"transcript_biotype"]
+head(res,20)
+
+genes_of_interest<-c("cpb-1","fog-1","fog-3","oma-1","pie-1","him-3","spo-11","C38C6.8","mab-3","spn-4")
+res[res$name %in% genes_of_interest,]
+
+plot(res$log2FoldChange,-1*log10(res$padj),cex=0.5,pch=16)
+
+#Get average make and female fpkms
+kimble_fpkm<-as.data.frame(fpkm(kimble))
+(oocytes<-which(colData(kimble)[colnames(kimble_fpkm),"sex"]=="q71"))
+(sperm<-which(colData(kimble)[colnames(kimble_fpkm),"sex"]=="q96"))
+kimble_fpkm$oocytes<-apply(kimble_fpkm,1,function(x) mean(x[oocytes]))
+kimble_fpkm$sperm<-apply(kimble_fpkm,1,function(x) mean(x[sperm]))
+
+#merge with res
+idx<-match(rownames(res),rownames(kimble_fpkm))
+res$oocyte_fpkm<-round(kimble_fpkm[idx,"oocytes"],3)
+res$sperm_fpkm<-round(kimble_fpkm[idx,"sperm"],3)
+
+head(kimble_data<-res)
+```
+
+
+
+Do a merge to upload
+```{r}
+head(temp<-read.csv(file="enrichment_relative_to_LysateRZ_112715.csv",stringsAsFactors=F,row.names=1))
+dim(temp)
+dim(kimble_data)
+idx<-match(rownames(temp),rownames(kimble_data))
+temp$gonad.baseMean<-kimble_data[idx,"baseMean"]
+temp$gonadLog2FoldChange<-kimble_data[idx,"log2FoldChange"]
+temp$gonadPadj<-kimble_data[idx,"padj"]
+head(temp)
+temp[temp$Gene.Name %in% genes_of_interest,]
+
+write.csv(temp,file="enrichment_relative_to_LysateRZ_withGonadEnrichment_121815.csv",quote=F)
+
+```
+
+"Tue Jan 10 11:38:52 2017"
+I have sat down to try to write the RNAseq section of the Results. I am trying to do as much as I can myself, to make this most efficient for you. I am beginning by doing what I can and organizing things and making an outline (before actually writing). I am looking through the data to see if I can distinguish the obvious lin-41 somatic targets in the heterochronic pathway (i.e., lin-29 and mab-10) from oocyte targets. I am wondering whether I could get a file very similar to the enrichments_fpkms_112715 file but with the  Kimble log2 oocyte enrichment in the spreadsheet with the fpkms in the ip and lysate. The reason is I am thinking of binning mRNAs enriched in the LIN-41 IP by abundance in the IP and then in each group scoring oocyte enrichment (like Figure 3C in Spike et al, 2014a). Does this make sense?
+
+```{r}
+#need abundance in the lin-41 IP samples vs enrichment 
+temp2<-as.data.frame(temp)
+
+head(f<-as.data.frame(fpkm(cds,robust=TRUE)))
+(oma1_ip_columns<-which(grepl("OMA-1_IP",colnames(f))))
+(lin41_ip_columns<-which(grepl("LIN-41_IP",colnames(f))))
+f$oma1_ip_mean<-apply(f,1,function(x) mean(x[oma1_ip_columns]))
+f$lin41_ip_mean<-apply(f,1,function(x) mean(x[lin41_ip_columns]))
+
+#add kimble mean FPKM values to our data
+summary(idx<-match(rownames(temp2),rownames(kimble_data)))
+temp2$sperm_fpkm<-kimble_data[idx,"sperm_fpkm"]
+temp2$oocyte_fpkm<-kimble_data[idx,"oocyte_fpkm"]
+temp2$kimble_log2FC<-kimble_data[idx,"log2FoldChange"]
+temp2$kimble_padj<-kimble_data[idx,"padj"]
+
+
+idx<-match(rownames(temp2),rownames(f))
+temp2$oma1_ip_mean<-f[idx,"oma1_ip_mean"]
+temp2$lin41_ip_mean<-f[idx,"lin41_ip_mean"]
+head(temp2)
+
+
+plot(log2(temp2$oma1_ip_mean),log2(temp2$oocyte_fpkm),cex=0.5,pch=16)
+plot(log2(temp2$oma1_ip_mean),temp2$kimble_log2FC,cex=0.5,pch=16)
+abline(h=0,col="red")
+
+plot(log2(temp2$lin41_ip_mean),log2(temp2$oocyte_fpkm),cex=0.5,pch=16)
+plot(log2(temp2$lin41_ip_mean),temp2$kimble_log2FC,cex=0.5,pch=16)
+abline(h=0,col="red")
+
+temp2[1:12,]
+g1<-temp2 %>%  
+  mutate(kimble_log2FC=ifelse(is.na(kimble_log2FC),0,kimble_log2FC)) %>% # set NA's to 0 difference
+  ggplot(aes(x=log2(lin41_ip_mean),y=`Lin-41 IP`)) +
+  ggtitle("Lin-41 Enrichment vs Abundance") + xlab("Log2 (Lin-41 FPKM)") + ylab("Log2 Lin-41 Enrichment in IP")+
+  xlim(c(-12,20)) + ylim(c(-10,10)) +
+  geom_point(size=0.5,aes(colour = kimble_log2FC)) + 
+  scale_colour_gradient2(low = "red2", mid = "white", high = "darkblue") +
+  theme_bw()
+
+g2<-temp2 %>%  
+  mutate(kimble_log2FC=ifelse(is.na(kimble_log2FC),0,kimble_log2FC)) %>% # set NA's to 0 difference
+  ggplot(aes(x=log2(oma1_ip_mean),y=`Oma-1 IP`)) +
+  xlim(c(-12,20)) + ylim(c(-10,10)) +
+  ggtitle("Oma-1 Enrichment vs Abundance") + xlab("Log2 (Oma-1 FPKM)") + ylab("Log2 Oma-1 Enrichment in IP")+
+  geom_point(size=0.5,aes(colour = kimble_log2FC)) + 
+  scale_colour_gradient2(low = "red2", mid = "white", high = "darkblue") +
+  theme_bw()
+svglite("testplot.svg",width=10,height=8)
+grid.arrange(g2,g1,ncol=2)
+dev.off()
+```
+
+Make a barplot showing the bias for Oocyte specific genes in the IP'd RNPs.  The point here is to determine if the RNPs are loaded in a biased way with transcripts involved in oogenesis.  Spike et al originally showed this by seeing how many oogenic genes were in each "bin" of the transcripts present in the IP.  But very low abundance transcripts that are oocyte enriched may have large enrichments in the RNPs that would be lost by just binning the IP transcripts by abundance.  Probably need to look at it both ways and see if a clear trend is present.
+
+Rethink - these RNPs are clearly going to be loaded with oocyte genes since the expression of the tagged construct is mostly oocyte.   It is really just a control to show that the enriched genes are (IP vs lysate) are 
+```{r}
+#try a volcano on the kimble data
+temp2 %>%  
+ # mutate(kimble_log2FC=ifelse(is.na(kimble_log2FC),0,kimble_log2FC)) %>% # set NA's to 0 difference
+  ggplot(aes(x=kimble_log2FC,y=(-1)*log10(kimble_padj))) +
+  ggtitle("Lin-41 Enrichment vs Abundance") + xlab("Log2 (Lin-41 FPKM)") + ylab("Log2 Lin-41 Enrichment in IP")+
+#  xlim(c(-12,20)) + ylim(c(-10,10)) +
+  geom_point(size=0.5,aes(colour = `Oma-1 IP`)) + 
+  scale_colour_gradient2(low = "red2", mid = "white", high = "darkblue") +
+  theme_bw()
+
+#make the barplot
+temp2 %>% 
+  dplyr::select(oma1_ip_mean,lin41_ip_mean,oocyte_fpkm) %>% 
+  mutate(oocyte_fpkm=ifelse(is.na(oocyte_fpkm),0.001,oocyte_fpkm)) %>% 
+  gather(gene,fpkm,oma1_ip_mean,lin41_ip_mean) %>% 
+  mutate(high_oocyte = ifelse(oocyte_fpkm > 1,"Oogenic","not Oogenic")) %>% 
+  mutate(bin=cut(log2(fpkm+0.001),5,labels=c("e","d","c","b","a"))) %>% 
+  mutate(bin=factor(bin,levels=c("a","b","c","d","e"))) %>% 
+  group_by(gene,bin) %>% 
+  ggplot(aes(x=gene,fill=high_oocyte))+
+  geom_bar(stat="count") +facet_grid(.~bin) + theme_bw() +
+  xlab("High Abundance  ... Low Abundance") +
+  ylab("Number of Transcripts, color by Oocyte Expression Level")  +
+  theme(axis.text.x = element_text(angle = 90,  hjust = 0)) 
+
+
+  summarize(n=sum(high_oocyte))
+?c
+  
+  ggplot(aes(x=gene,y=(-1)*log10(kimble_padj))) +
+    geom_bar()
+```
+
+```{r}
+#add annotations to f
+idx<-match(rownames(f),annotations$ensembl_gene_id)
+f$name<-annotations[idx,]$external_gene_name
+head(f)
+f[grep("mab-10",f$name),]
+f[grep("pud-4",f$name),]
+write.csv(f,file="fpkm_112715.csv",quote=F)
+```
+
+#Venn Diagrams
+```{r}
+lfc<-2
+x<-nrow(temp[temp$Lin.41.IP > lfc,])
+y<-nrow(temp[temp$Oma.1.IP > lfc,])
+z<-nrow(temp[temp$Lin.41.IP > lfc & temp$Oma.1.IP > lfc,])
+#svglite("testplot.svg")
+grid.newpage()
+vennplot <- draw.pairwise.venn(x,y,z, c("Lin-41", "Oma-1"))
+#dev.off()
+
+write.csv(temp[temp$Lin.41.IP > lfc | temp$Oma.1.IP > lfc,],file="enrichment_4fold.csv",quote=F)
+
+temp[temp$Gene.Name %in% c("cdc-25.3", "zif-1","rnp-1"),]
+
+
+```
+
+#MICRO RNAs
+```{r}
+load("/mnt/gcd/greenste/smallRNAhits_ens82_WBcel235_032116.rdata")
+temp<-as.data.frame(assays(smallRNAhits)$counts)
+#type<-getBM(filters="ensembl_gene_id",values=rownames(temp), attributes=c("ensembl_gene_id","transcript_biotype"), mart=ensembl_82)
+#table(type$transcript_biotype)
+#head(annotations<-getBM(filters="ensembl_gene_id",values=rownames(temp), attributes=c("ensembl_gene_id","wikigene_name","transcript_biotype","external_gene_name"), mart=ensembl_82))
+G
+```
+#Why is lin-4 (WBGene00002993) not showing up in the input count table?
+```{r}
+(fls <- list.files("/mnt/gcd/greenste", pattern=glob2rx("lin*.bam"),full=TRUE))
+bamlst <- BamFileList(fls)
+detectCores()
+register(MulticoreParam(workers=detectCores()))
+rnahits <- summarizeOverlaps(ens84small,bamlst,mode="Union",singleEnd=TRUE,ignore.strand=TRUE)
+temp<-as.data.frame(assays(rnahits)$counts)
+apply(temp,2,sum)
+head(temp)
+temp<-temp[temp[,1] > 10 & temp[,2] > 10,]
+temp["WBGene00002993",]
+
+
+```
+
+Mirbase Annotations
+```{r}
+download.file("ftp://mirbase.org/pub/mirbase/CURRENT/genomes/cel.gff3",destfile="cel_mb21.gff3")
+cel_mb21<-rtracklayer::import("cel_mb21.gff3")
+seqlevelsStyle(cel_mb21)<-"NCBI"
+mbhits <- summarizeOverlaps(cel_mb21,bamlst,mode="Union",singleEnd=TRUE,ignore.strand=TRUE)
+mbhitsDF<-as.data.frame(assays(mbhits)$counts)
+apply(mbhitsDF,2,sum)
+head(mbhitsDF)
+mbhitsDF[rowSums(mbhitsDF) > 5,]
+
+cel_mb21[171]
+```
+
+
+CSR1 IP
+```{r}
+(fls <- list.files("/mnt/gcd/greenste", pattern=glob2rx("*trimmed.bam"),full=TRUE))
+csr1hits <- summarizeOverlaps(ens84,bamlst,mode="Union",singleEnd=TRUE,ignore.strand=TRUE)
+csr1DF<-as.data.frame(assays(csr1hits)$counts)
+apply(csr1DF,2,sum)
+head(csr1DF)
+(n<-c(countBam(fls[1])$records,countBam(fls[2])$records))
+
+idx<-match(rownames(csr1DF),type$ensembl_gene_id)
+csr1DF$type<-type[idx,"transcript_biotype"]
+head(csr1DF)
+
+idx<-match(rownames(csr1DF),annotations$ensembl_gene_id)
+csr1DF$wiki<-annotations[idx,"wikigene_name"]
+csr1DF$ext_genename<-annotations[idx,"external_gene_name"]
+head(csr1DF)
+
+#n<-apply(temp[,1:2],2,sum)
+(n<-c(countBam(fls[1])$records,countBam(fls[2])$records))
+
+
+csr1DF$l2inp<-log2((csr1DF[,2]+1)*1e6/n[2])
+csr1DF$l2ip<-log2((csr1DF[,1]+1)*1e6/n[1])
+#temp<-temp[rowSums(temp)>50,]
+csr1DF$m<-csr1DF$l2ip-csr1DF$l2inp
+csr1DF$a<-(csr1DF$l2ip+csr1DF$l2inp)/2
+plot(csr1DF$a,csr1DF$m,cex=0.5,pch=16)
+abline(h=0,col="red")
+csr1DF[identify(csr1DF$a,csr1DF$m,labels=csr1DF$ext_genename),]
+#temp[identify(log2(temp)),]
+csr1DF %>%
+ # filter(type=="protein_coding") %>%
+ggplot(aes(x=a,y=m,colour=type)) +geom_point() +theme_bw()
+
+
+
+plot(temp$a,temp$m,cex=0.5,pch=16)
+temp[identify(temp$a,temp$m,cex=0.5,pch=16),]
+
+temp<-temp[with(temp,order(-m)),]
+head(temp[temp$type=="miRNA",],40)
+
+```
+
+
+
+```
+
