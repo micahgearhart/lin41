@@ -3,8 +3,8 @@ title: "Lin41 Analysis"
 author: "Micah Gearhart"
 date: "1/6/2017"
 output:
-  md_document:
-    variant: markdown_github
+  html_document:
+    keep_md: true
 ---
 
 ```{r setup, include=FALSE}
@@ -33,6 +33,7 @@ library("tidyr")
 library("magrittr")
 library("RColorBrewer")
 library("gridExtra")
+library("motifStack")
 
 (ts<-format(Sys.time(), "%a_%b_%d_%Y_%H%M"))
 cbPalette <- c("#999999", "#E69F00", "#56B4E9", "#009E73", "#F0E442", "#0072B2", "#D55E00", "#CC79A7")
@@ -332,7 +333,236 @@ ggplot(aes(x=term,y=-log10(over_represented_pvalue))) +
   theme_bw() 
 ```
 
+# Download UTR sequences from biomaRt
+```{r utr_biomart,eval=F}
+#get transcript identifiers for all expressed genes
+expressed_transcripts<-getBM(filters="ensembl_gene_id",values=expressed_genes, attributes=c("ensembl_gene_id","ensembl_transcript_id"), mart=ensembl_87)
+
+seq3utr<-getSequence(id = expressed_transcripts$ensembl_transcript_id, type = "ensembl_transcript_id", seqType = "3utr", mart = ensembl_87)
+seq5utr<-getSequence(id = expressed_transcripts$ensembl_transcript_id, type = "ensembl_transcript_id", seqType = "5utr", mart = ensembl_87)
+save(seq3utr,seq5utr,file="utr_sequences.rdata")
+```
+
+
+
+# Search for OMA-1 and LIN-41 Motifs in 3' UTRs
+```{r threeUTR}
+load("utr_sequences.rdata")
+
+#clean up UTR sequences
+seq3utr<-seq3utr[seq3utr$`3utr`!="Sequence unavailable",]
+seq3utr<-seq3utr[nchar(seq3utr$`3utr`) >=8,]  # get rid of really short 3'UTRs
+
+# add geneid to dataframe
+summary(idx<-match(seq3utr$ensembl_transcript_id,expressed_transcripts$ensembl_transcript_id))
+seq3utr$ensembl_gene_id<-expressed_transcripts[idx,"ensembl_gene_id"]
+sum(duplicated(paste0(seq3utr$`3utr`,seq3utr$ensembl_transcript_id)))
+sum(duplicated(paste0(seq3utr$`3utr`,seq3utr$ensembl_gene_id)))
+seq3utr<-seq3utr[!duplicated(paste0(seq3utr$`3utr`,seq3utr$ensembl_gene_id)),]
+
+seq3utrBS<-DNAStringSet(seq3utr$`3utr`)
+names(seq3utrBS)<-seq3utr$ensembl_transcript_id
+summary(width(seq3utrBS))
+seq3utr<-seq3utr[,-1]  #drop sequence from dataframe
+
+#Count TAW motif and RNACompete Motif in each transcript
+seq3utr$taw<-vcountPattern("TAW",seq3utrBS,fixed=FALSE)
+table(as.logical(seq3utr$taw))
+
+#Count RNAcompete motif in each transcript
+rnaCompeteMotif<-RNAStringSet(c("GCAAAGC","GUAAAAC","GUAUAAC","GCAUAGC","CUUUAAG"))
+temp<-consensusMatrix(rnaCompeteMotif)[1:4,]
+plotMotifLogo(new("pfm",mat=t(t(temp[1:4,])*1/colSums(temp[1:4,])), name="RNAcompeteMotif"))
+
+lin41_consensusMatrix<-consensusMatrix(DNAStringSet(rnaCompeteMotif))[1:4,]
+
+seq3utr$loedige<-unlist(lapply(seq3utrBS,function(x) countPWM(lin41_consensusMatrix,x,min.score="90%")))
+table(as.logical(seq3utr$loedige))
+
+#oma-1 TAW
+temp<-seq3utr %>% group_by(ensembl_gene_id) %>% 
+  summarize(taw_log=as.logical(sum(taw)),loedige_log=as.logical(sum(loedige))) %>% as.data.frame
+
+a<-sum(temp[temp$ensembl_gene_id %in% oma1_genes,"taw_log"])
+b<-sum(temp[!temp$ensembl_gene_id %in% oma1_genes,"taw_log"])
+c<-sum(oma1_genes %in% temp$ensembl_gene_id)
+d<-sum(expressed_genes %in% temp$ensembl_gene_id)
+
+(x<-matrix(c(d-b-c,b,c-a,a),ncol=2))
+(oma1_taw_3p_test<-fisher.test(x))
+
+#oma-1 loedige
+a<-sum(temp[temp$ensembl_gene_id %in% oma1_genes,"loedige_log"])
+b<-sum(temp[!temp$ensembl_gene_id %in% oma1_genes,"loedige_log"])
+c<-sum(oma1_genes %in% temp$ensembl_gene_id)
+d<-sum(expressed_genes %in% temp$ensembl_gene_id)
+
+(x<-matrix(c(d-b-c,b,c-a,a),ncol=2))
+(oma1_loedige_3p_test<-fisher.test(x))
+
+#lin41 TAW
+a<-sum(temp[temp$ensembl_gene_id %in% lin41_genes,"taw_log"])
+b<-sum(temp[!temp$ensembl_gene_id %in% lin41_genes,"taw_log"])
+c<-sum(lin41_genes %in% temp$ensembl_gene_id)
+d<-sum(expressed_genes %in% temp$ensembl_gene_id)
+
+(x<-matrix(c(d-b-c,b,c-a,a),ncol=2))
+(lin41_taw_3p_test<-fisher.test(x))
+
+#lin41 loedige
+a<-sum(temp[temp$ensembl_gene_id %in% lin41_genes,"loedige_log"])
+b<-sum(temp[!temp$ensembl_gene_id %in% lin41_genes,"loedige_log"])
+c<-sum(lin41_genes %in% temp$ensembl_gene_id)
+d<-sum(expressed_genes %in% temp$ensembl_gene_id)
+
+(x<-matrix(c(d-b-c,b,c-a,a),ncol=2))
+(lin41_loedige_3p_test<-fisher.test(x))
+
+print(paste0("TAW motif enrichment in 3' UTR of Oma1 Enriched Genes:  ",oma1_taw_test$p.value))
+print(paste0("RNAcompete Lin-41 motif enrichment in 3' UTR of Oma1 Enriched Genes:  ",oma1_loedige_test$p.value))
+print(paste0("TAW motif enrichment in 3' UTR of Lin-41 Enriched Genes:  ",lin41_taw_test$p.value))
+print(paste0("RNACompete Lin-41 motif enrichment in 3' UTR of Lin-41 Enriched Genes:  ",lin41_loedige_test$p.value))
+```
+
+# # Search for OMA-1 and LIN-41 Motifs in 5' UTRs 
+```{r fiveUTR}
+#clean up UTR sequences
+seq5utr<-seq5utr[seq5utr$`5utr`!="Sequence unavailable",]
+seq5utr<-seq5utr[nchar(seq5utr$`5utr`) >=8,]  # get rid of really short 3'UTRs
+
+# add geneid to dataframe
+summary(idx<-match(seq5utr$ensembl_transcript_id,expressed_transcripts$ensembl_transcript_id))
+seq5utr$ensembl_gene_id<-expressed_transcripts[idx,"ensembl_gene_id"]
+sum(duplicated(paste0(seq5utr$`5utr`,seq5utr$ensembl_transcript_id)))
+sum(duplicated(paste0(seq5utr$`5utr`,seq5utr$ensembl_gene_id)))
+seq5utr<-seq5utr[!duplicated(paste0(seq5utr$`5utr`,seq5utr$ensembl_gene_id)),]
+
+seq5utrBS<-DNAStringSet(seq5utr$`5utr`)
+names(seq5utrBS)<-seq5utr$ensembl_transcript_id
+summary(width(seq5utrBS))
+seq5utr<-seq5utr[,-1]  #drop sequence from dataframe
+
+#Count TAW motif and RNACompete Motif in each transcript
+seq5utr$taw<-vcountPattern("TAW",seq5utrBS,fixed=FALSE)
+table(as.logical(seq5utr$taw))
+
+#Count RNAcompete motif in each transcript
+seq5utr$loedige<-unlist(lapply(seq5utrBS,function(x) countPWM(lin41_consensusMatrix,x,min.score="90%")))
+table(as.logical(seq5utr$loedige))
+
+#oma-1 TAW
+temp<-seq5utr %>% group_by(ensembl_gene_id) %>% 
+  summarize(taw_log=as.logical(sum(taw)),loedige_log=as.logical(sum(loedige))) %>% as.data.frame
+
+a<-sum(temp[temp$ensembl_gene_id %in% oma1_genes,"taw_log"])
+b<-sum(temp[!temp$ensembl_gene_id %in% oma1_genes,"taw_log"])
+c<-sum(oma1_genes %in% temp$ensembl_gene_id)
+d<-sum(expressed_genes %in% temp$ensembl_gene_id)
+
+(x<-matrix(c(d-b-c,b,c-a,a),ncol=2))
+(oma1_taw_5p_test<-fisher.test(x))
+
+#oma-1 loedige
+a<-sum(temp[temp$ensembl_gene_id %in% oma1_genes,"loedige_log"])
+b<-sum(temp[!temp$ensembl_gene_id %in% oma1_genes,"loedige_log"])
+c<-sum(oma1_genes %in% temp$ensembl_gene_id)
+d<-sum(expressed_genes %in% temp$ensembl_gene_id)
+
+(x<-matrix(c(d-b-c,b,c-a,a),ncol=2))
+(oma1_loedige_5p_test<-fisher.test(x))
+
+#lin41 TAW
+a<-sum(temp[temp$ensembl_gene_id %in% lin41_genes,"taw_log"])
+b<-sum(temp[!temp$ensembl_gene_id %in% lin41_genes,"taw_log"])
+c<-sum(lin41_genes %in% temp$ensembl_gene_id)
+d<-sum(expressed_genes %in% temp$ensembl_gene_id)
+
+(x<-matrix(c(d-b-c,b,c-a,a),ncol=2))
+(lin41_taw_5p_test<-fisher.test(x))
+
+#lin41 loedige
+a<-sum(temp[temp$ensembl_gene_id %in% lin41_genes,"loedige_log"])
+b<-sum(temp[!temp$ensembl_gene_id %in% lin41_genes,"loedige_log"])
+c<-sum(lin41_genes %in% temp$ensembl_gene_id)
+d<-sum(expressed_genes %in% temp$ensembl_gene_id)
+
+(x<-matrix(c(d-b-c,b,c-a,a),ncol=2))
+(lin41_loedige_5p_test<-fisher.test(x))
+
+print(paste0("TAW motif enrichment in 5' UTR of Oma1 Enriched Genes:  ",oma1_taw_5p_test$p.value))
+print(paste0("RNAcompete Lin-41 motif enrichment in 5' UTR of Oma1 Enriched Genes:  ",oma1_loedige_5p_test$p.value))
+print(paste0("TAW motif enrichment in Lin-41 5' UTR of Enriched Genes:  ",lin41_taw_5p_test$p.value))
+print(paste0("RNACompete Lin-41 motif enrichment in 5' UTR of Lin-41 Enriched Genes:  ",lin41_loedige_5p_test$p.value))
+```
+
+
+
 # explore UTR's of LIN-41 exclusive set
+```{r}
+
+#count UA[A/U]  "TAW" motif in each 5'utr
+seq5utr<-getSequence(id = lin41_genesq4_exclusive, type = "ensembl_gene_id", seqType = "5utr", mart = ensembl_87)
+seq5utr<-seq5utr[seq5utr$`5utr`!="Sequence unavailable",]
+summary(nchar(seq5utr$`5utr`))
+seq5utrBS<-DNAStringSet(seq5utr$`5utr`)
+seq5utr$taw<-vcountPattern("TAW",seq5utrBS,fixed=FALSE)
+
+#count UA[A/U]  "TAW" motif in each 5'utr
+seq3utr<-getSequence(id = lin41_genesq4_exclusive, type = "ensembl_gene_id", seqType = "3utr", mart = ensembl_87)
+seq3utr<-seq3utr[seq3utr$`3utr`!="Sequence unavailable",]
+summary(nchar(seq3utr$`3utr`))
+
+#count UA[A/U]  "TAW" motif in each 5'utr
+seq3utrBS<-DNAStringSet(seq3utr$`3utr`)
+seq3utr$taw<-vcountPattern("TAW",seq3utrBS,fixed=FALSE)
+
+rnaCompeteMotif<-RNAStringSet(c("GCAAAGC","GUAAAAC","GUAUAAC","GCAUAGC","CUUUAAG"))
+temp<-consensusMatrix(rnaCompeteMotif)[1:4,]
+plotMotifLogo(new("pfm",mat=t(t(temp[1:4,])*1/colSums(temp[1:4,])), name="RNAcompeteMotif"))
+
+temp<-consensusMatrix(DNAStringSet(rnaCompeteMotif))[1:4,]
+x<-countPWM(temp,seq3utrBS[[1]],min.score="80%", with.score=FALSE)
+
+table(x<-unlist(lapply(seq3utrBS,function(x) countPWM(temp,x,min.score="80%"))))
+table(y<-unlist(lapply(seq5utrBS,function(x) countPWM(temp,x,min.score="80%"))))
+```
+
+#meme
+```{r}
+motifSet <- runMEME(file.path(system.file("extdata",package="TFBSTools"), "crp0.s"),
+                    binary="/usr/ngs/bin/meme/bin/meme",arguments=list("-nmotifs"=3))
+x<-readDNAStringSet(file.path(system.file("extdata",package="TFBSTools"), "crp0.s"))
+
+motifSet <- runMEME(x, binary="/usr/ngs/bin/meme/bin/meme",arguments=list("-nmotifs"=3))
+
+names(seq3utrBS)<-paste0("seq3utr_",1:length(seq3utrBS))
+summary(width(seq3utrBS))
+seq3utrBS<-seq3utrBS[width(seq3utrBS)>= 8]
+writeXStringSet(seq3utrBS,file="test3p.fasta")
+motifSet_3utr <- runMEME(seq3utrBS, binary="/usr/ngs/bin/meme/bin/meme",arguments=list("-nmotifs"=3,"-maxsize"=10000000000000000,"-w"=5))
+motifSet_3utr <- runMEME(seq3utrBS, binary="/usr/ngs/bin/meme/bin/meme",arguments=list("-nmotifs"=3,"-maxsize"=10000000000000000))
+
+(temp<-consensusMatrix(motifSet_3utr)[[2]])
+rownames(temp)<-c("A","C","G","U")
+plotMotifLogo(new("pfm",mat=t(t(temp[1:4,])*1/colSums(temp[1:4,])), name="3'UTR motif"))
+
+seq5utrBS<-seq5utrBS[width(seq5utrBS)>= 8]
+names(seq5utrBS)<-paste0("seq5utr_",1:length(seq5utrBS))
+writeXStringSet(seq5utrBS,file="test5p.fasta")
+motifSet_5utr <- runMEME(seq5utrBS, binary="/usr/ngs/bin/meme/bin/meme",arguments=list("-nmotifs"=3,"-maxsize"=10000000000000000,"-w"=5))
+motifSet_5utr <- runMEME(seq5utrBS, binary="/usr/ngs/bin/meme/bin/meme",arguments=list("-nmotifs"=3,"-maxsize"=10000000000000000))
+consensusMatrix(motifSet_5utr)
+
+(temp<-consensusMatrix(motifSet_5utr)[[3]])
+rownames(temp)<-c("A","C","G","U")
+plotMotifLogo(new("pfm",mat=t(t(temp[1:4,])*1/colSums(temp[1:4,])), name="3'UTR motif"))
+
+```
+
+
+## ###########  #########
+
+#Is there a clever way to determine which transcript is expressed to know which UTR to use?
 ```{r}
 d<-res_dds87q4[,]
 plot(d[,3],d[,2],cex=0.5,pch=16,ylim=c(-7,7),xlim=c(-7,7),
@@ -360,31 +590,7 @@ temp<-fiveUTRhits87_mapq_filter[idx,]
 fiveUTRhits87_mapq_filter["Y39A1A.12",]
 assays(fiveUTRhits87_mapq_filter["W03C9.4a",])$counts
 assays(fiveUTRhits87_mapq_filter["W03C9.4c",])$counts
-
-
-
-#count UA[A/U]  "TAW" motif in each 5'utr
-seq5utr<-getSequence(id = lin41_genesq4_exclusive, type = "ensembl_gene_id", seqType = "5utr", mart = ensembl_87)
-seq5utr<-seq5utr[seq5utr$`5utr`!="Sequence unavailable",]
-summary(nchar(seq5utr$`5utr`))
-seq5utrBS<-DNAStringSet(seq5utr$`5utr`)
-seq5utr$taw<-vcountPattern("TAW",seq5utrBS,fixed=FALSE)
-
-#count UA[A/U]  "TAW" motif in each 5'utr
-seq3utr<-getSequence(id = lin41_genesq4_exclusive, type = "ensembl_gene_id", seqType = "3utr", mart = ensembl_87)
-seq3utr<-seq3utr[seq3utr$`3utr`!="Sequence unavailable",]
-summary(nchar(seq3utr$`3utr`))
-#count UA[A/U]  "TAW" motif in each 5'utr
-seq3utrBS<-DNAStringSet(seq3utr$`3utr`)
-seq3utr$taw<-vcountPattern("TAW",seq3utrBS,fixed=FALSE)
-
-
-
 ```
-
-
-
-## ###########  #########
 
 
 
