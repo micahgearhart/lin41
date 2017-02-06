@@ -34,76 +34,37 @@ library("magrittr")
 library("RColorBrewer")
 library("gridExtra")
 library("motifStack")
+library("VennDiagram")
 
 (ts<-format(Sys.time(), "%a_%b_%d_%Y_%H%M"))
 cbPalette <- c("#999999", "#E69F00", "#56B4E9", "#009E73", "#F0E442", "#0072B2", "#D55E00", "#CC79A7")
+
+cbPalette2<-c("#cbc9e2","#9e9ac8","#6a51a3", "#fdbe85","#fd8d3c","#d94701",
+          "#56B4E9", "#009E73","#F0E442", "#0072B2", "black","red","green")
+
 wls<- function(x) { paste0(seqnames(x),":",start(x),"-",end(x))}
 ```
 
+
+
 ##Download Annotation files for Ensembl 82 and 87
 ```{r biomaRt, eval=F}
-ensembl_82 = useMart(biomart="ENSEMBL_MART_ENSEMBL", host="sep2015.archive.ensembl.org", path="/biomart/martservice",dataset="celegans_gene_ensembl")
-txdb<-makeTxDbFromBiomart(biomart="ENSEMBL_MART_ENSEMBL",host="sep2015.archive.ensembl.org",dataset="celegans_gene_ensembl")
-ens82<-exonsBy(txdb,by="gene")
-type82<-getBM(filters="ensembl_gene_id",values=names(ens82), attributes=c("ensembl_gene_id","transcript_biotype"), mart=ensembl_82)
-table(type82$transcript_biotype)
-save(ens82,type82,file="ens82.rdata")
 
 ensembl_87 = useMart(biomart="ENSEMBL_MART_ENSEMBL", host="useast.ensembl.org", path="/biomart/martservice",dataset="celegans_gene_ensembl")
 txdb<-makeTxDbFromBiomart(biomart="ENSEMBL_MART_ENSEMBL",host="useast.ensembl.org",dataset="celegans_gene_ensembl")
 
-tx87<-transcriptsBy(txdb, "gene")
-fiveUTR<-fiveUTRsByTranscript(txdb,use.names=T)
-threeUTR<-threeUTRsByTranscript(txdb,use.names=T)
-
+#tx87<-transcriptsBy(txdb, "gene")
 ens87<-exonsBy(txdb,by="gene")
-type87<-getBM(filters="ensembl_gene_id",values=names(ens87), attributes=c("ensembl_gene_id","transcript_biotype"), mart=ensembl_87)
-table(type87$transcript_biotype)
-save(ens87,type87,file="ens87.rdata")
-```
 
-```{r}
-countBam("./2566IP-1_S21.bam",param=ScanBamParam(flag = scanBamFlag(isUnmappedQuery = TRUE),))
+#annotations
+anno87<-getBM(filters="ensembl_gene_id",values=names(ens87), attributes=c("ensembl_gene_id","wikigene_name","transcript_biotype","external_gene_name"), mart=ensembl_87)
 
-mapq_filter <- function(features, reads, ignore.strand = FALSE, inter.feature=TRUE)
-{
-    require(GenomicAlignments) # needed for parallel evaluation
-    Union(features, reads[mcols(reads)$mapq >= 4],
-          ignore.strand, inter.feature)
-}
-
-param <- ScanBamParam(what="mapq")
-
-#select single end bam files that are not filtered by samtools (q4)
-(fls <- list.files(".", pattern=glob2rx("*.bam"),full=TRUE))
-(fls<-fls[!grepl("q4",fls)])
-(fls<-fls[!grepl("PE",fls)])
-bamlst <- BamFileList(fls)
-
-#summarizeOverlaps with multimappers
-genehits82<-summarizeOverlaps(ens82,bamlst,mode="Union",singleEnd=TRUE,ignore.strand=TRUE)
-apply(assays(genehits82)$counts,2,sum)
-
-#with multimapping Filter
-genehits82_mapq_filter<-summarizeOverlaps(ens82,bamlst,mode="mapq_filter", param=param,
-                                 singleEnd=TRUE,ignore.strand=TRUE)
-apply(assays(genehits82_mapq_filter)$counts,2,sum)
-
-#just check to make sure this is the same as samtools filtering
-(fls <- list.files(".", pattern=glob2rx("*_q4.bam"),full=TRUE))
-bamlst <- BamFileList(fls)
-genehits82q4<-summarizeOverlaps(ens82,bamlst,mode="Union",singleEnd=TRUE,ignore.strand=TRUE)
-apply(assays(genehits82q4)$counts,2,sum)
-
-all.equal(unname(apply(assays(genehits82_mapq_filter)$counts,2,sum)),unname(apply(assays(genehits82q4)$counts,2,sum)))
-
-save(genehits82,genehits82_mapq_filter,file="genehits82_Mon_Jan_30_2017_2210.rdata")
-
+save(ens87,anno87,file="ens87.rdata")
 ```
 
 
 #Count 2x for Ensembl 87
-```{r}
+```{r summarizeOverlaps, eval=F}
 load("ens87.rdata")
 mapq_filter <- function(features, reads, ignore.strand = FALSE, inter.feature=TRUE)
 {
@@ -130,13 +91,6 @@ genehits87_mapq_filter<-summarizeOverlaps(ens87,bamlst,mode="mapq_filter", param
                                  singleEnd=TRUE,ignore.strand=TRUE)
 apply(assays(genehits87_mapq_filter)$counts,2,sum)
 
-fiveUTRhits87_mapq_filter<-summarizeOverlaps(fiveUTR,bamlst,mode="mapq_filter", param=param,
-                                 singleEnd=TRUE,ignore.strand=TRUE)
-apply(assays(fiveUTRhits87_mapq_filter)$counts,2,sum)
-threeUTRhits87_mapq_filter<-summarizeOverlaps(threeUTR,bamlst,mode="mapq_filter", param=param,
-                                 singleEnd=TRUE,ignore.strand=TRUE)
-apply(assays(threeUTRhits87_mapq_filter)$counts,2,sum)
-
 #just check to make sure this is the same as samtools filtering
 #(fls <- list.files(".", pattern=glob2rx("*_q4.bam"),full=TRUE))
 #bamlst <- BamFileList(fls)
@@ -144,32 +98,33 @@ apply(assays(threeUTRhits87_mapq_filter)$counts,2,sum)
 #apply(assays(genehits82q4)$counts,2,sum)
 #all.equal(unname(apply(assays(genehits82_mapq_filter)$counts,2,sum)),unname(apply(assays(genehits82q4)$counts,2,sum)))
 
-save(genehits87,genehits87_mapq_filter,file=paste0("genehits87_",ts,".rdata")
+save(genehits87,genehits87_mapq_filter,file=paste0("genehits87_",ts,".rdata"))
 ```
 
 ## Compare the biotype Distributions across samples with and without a MAPQ filter
-```{r}
-load("genehits87_Tue_Jan_30_2017_1610.rdata")
+```{r eda,eval=T}
+load("ens87.rdata")
+load("genehits87_Mon_Feb_06_2017_1446.rdata")
 
 counts87<-as.data.frame(assays(genehits87)$counts)
 counts87q4<-as.data.frame(assays(genehits87_mapq_filter)$counts)
                           
-summary(idx<-match(rownames(counts87),type87$ensembl_gene_id))
-counts87$biotype<-type87[idx,"transcript_biotype"]
-counts87q4$biotype<-type87[idx,"transcript_biotype"]
+summary(idx<-match(rownames(counts87),anno87$ensembl_gene_id))
+counts87$biotype<-anno87[idx,"transcript_biotype"]
+counts87q4$biotype<-anno87[idx,"transcript_biotype"]
 
-g1<-gather(counts87,sample,counts,-biotype) %>%
-  group_by(sample,biotype) %>%
-  summarize(countSum=sum(counts)) %>%
+g1<-tidyr::gather(counts87,sample,counts,-biotype) %>%
+  dplyr::group_by(sample,biotype) %>%
+  dplyr::summarize(countSum=sum(counts)) %>%
   ggplot(aes(x=sample,y=countSum,fill=biotype)) + ggtitle("Counts with Ensembl87") +
-  scale_fill_manual(values=rev(colors),guide = guide_legend(reverse=TRUE)) +
+  scale_fill_manual(values=rev(cbPalette2),guide = guide_legend(reverse=TRUE)) +
   geom_bar(stat="identity") + theme_classic() + theme(axis.text.x = element_text(angle = 90,  hjust = 0)) 
 
-g2<-gather(counts87q4,sample,counts,-biotype) %>%
-  group_by(sample,biotype) %>%
-  summarize(countSum=sum(counts)) %>%
+g2<-tidyr::gather(counts87q4,sample,counts,-biotype) %>%
+  dplyr::group_by(sample,biotype) %>%
+  dplyr::summarize(countSum=sum(counts)) %>%
   ggplot(aes(x=sample,y=countSum,fill=biotype)) + ggtitle("Counts with Ensembl87 with Mapping Quality Filter") +
-  scale_fill_manual(values=rev(colors),guide = guide_legend(reverse=TRUE)) +
+  scale_fill_manual(values=rev(cbPalette2),guide = guide_legend(reverse=TRUE)) +
   geom_bar(stat="identity") + theme_classic() + theme(axis.text.x = element_text(angle = 90,  hjust = 0)) 
 
 grid.arrange(g1,g2,ncol=1)
@@ -177,10 +132,10 @@ grid.arrange(g1,g2,ncol=1)
 
 
 # Filter out rRNA genes and analyze for Enrichment relative to Input
-```{r}
-summary(idx<-match(rownames(genehits87),type87$ensembl_gene_id))
-dim(dds87<-DESeqDataSet(genehits87[type87[idx,]$transcript_biotype != "rRNA",],design=~1))
-dim(dds87q4<-DESeqDataSet(genehits87_mapq_filter[type87[idx,]$transcript_biotype != "rRNA",],design=~1))
+```{r PCA,eval=T}
+summary(idx<-match(rownames(genehits87),anno87$ensembl_gene_id))
+dim(dds87<-DESeqDataSet(genehits87[anno87[idx,]$transcript_biotype != "rRNA",],design=~1))
+dim(dds87q4<-DESeqDataSet(genehits87_mapq_filter[anno87[idx,]$transcript_biotype != "rRNA",],design=~1))
 
 file_names<-colnames(dds87)
 colnames(dds87)<-sapply(strsplit(colnames(dds87),"_"),function(x) x[1]) %>%
@@ -201,7 +156,7 @@ plotPCA( DESeqTransform( dds87q4 ),intgroup="tag")+ ggtitle("PCA with MapQ Filte
 ```
 
 ## Run Differential Expression on both dds objects
-```{r}
+```{r DESeq2,eval=T}
 dds87<-DESeq(dds87)
 plotMA(dds87,ylim=c(-8,8))
 resultsNames(dds87)
@@ -232,8 +187,13 @@ colnames(res_dds87q4)<-c("Oma-1 042310","Oma-1 IP","Lin-41 IP")
 ```
 
 
+## MAKE A Master Table with MAPQ FLAG and Biotype
+
+
+
+
 #Venn Diagrams - with p-values
-```{r}
+```{r vennDiagrams,eval=T}
 
 lfc<-2  # also note not using abs() here -- just want enrichment
 p<-0.05
@@ -253,85 +213,130 @@ grid.newpage()
 vennplot <- draw.pairwise.venn(x2,y2,z2, c("Oma-1", "Lin-41"))
 ```
 
-#
-
-
-```{r}
-lfc<-2
-summary(res_dds87)
-
-#remove the NAs
-temp<-as.data.frame(res_dds87[!(is.na(res_dds87[,2]) | is.na(res_dds87[,3])),])
-tempq4<-as.data.frame(res_dds87q4[!(is.na(res_dds87q4[,2]) | is.na(res_dds87q4[,3])),])
-
-(x1<-nrow(temp[temp$`Lin-41 IP`> lfc,]))
-(y1<-nrow(temp[temp$`Oma-1 IP` > lfc,]))
-(z1<-nrow(temp[temp$`Lin-41 IP` > lfc & temp$`Oma-1 IP` > lfc,]))
-
-(x2<-nrow(tempq4[tempq4$`Lin-41 IP`> lfc,]))
-(y2<-nrow(tempq4[tempq4$`Oma-1 IP` > lfc,]))
-(z2<-nrow(tempq4[tempq4$`Lin-41 IP` > lfc & tempq4$`Oma-1 IP` > lfc,]))
-
-#svglite("testplot.svg")
-grid.newpage()
-vennplot <- draw.pairwise.venn(x1,y1,z1, c("Lin-41", "Oma-1"))
-grid.newpage()
-vennplot <- draw.pairwise.venn(x2,y2,z2, c("Lin-41", "Oma-1"))
-#dev.off()
+## Use scatterplot to visualize relationships in Venn Diagram
+```{r scatterplot,eval=T}
+d<-res_dds87q4[,]
+plot(d[,3],d[,2],cex=0.5,pch=16,ylim=c(-7,7),xlim=c(-7,7),main="Oma-1 vs Lin-41 Enrichment", 
+     xlab="LIN-41 Log2Fold Change",ylab="OMA-1 Log2Fold Change",
+     col=ifelse(rownames(d) %in% overlapq4,"blue",
+                ifelse(rownames(d) %in% oma1_genesq4_exclusive,"green",
+                ifelse(rownames(d) %in% lin41_genesq4_exclusive,"red","black"))))
+abline(a=0,b=1,col="red")
 ```
 
+
 #Now run GO Analysis on each section of Venn Diagram
-```{r}
+## GO Analysis
+```{r download_GO, eval=F}
+downloader::download("ftp://ftp.wormbase.org/pub/wormbase/releases/WS257/ONTOLOGY/gene_association.WS257.wb",
+                     "gene_association.WS257.wb")
+downloader::download("ftp://ftp.wormbase.org/pub/wormbase/releases/WS257/ONTOLOGY/gene_ontology.WS257.obo",
+                     "gene_ontology.WS257.obo")
+
+ga<-readr::read_delim("gene_association.WS257.wb",skip=3,delim="\t",col_names=F)
+
+#Scan in OBO file to get Biological Process terms
+t1<-readLines("gene_ontology.WS257.obo",n=-1L)
+terms<-list()
+
+for (i in seq_along(1:length(t1))) {
+  if (t1[i]=="[Term]") {
+    gt<-substr(t1[i+1],5,14)
+    name<-gsub("name: ","",t1[i+2])
+    if (t1[i+3]=="namespace: biological_process") { 
+      #print (paste0(gt,":  ",name)) 
+      terms[[gt]]<-name
+    }
+    }
+}
+go_terms<-unlist(terms)
+
+head(ga)
+wb_go<-ga[ga$'X5' %in% names(go_terms),c('X2','X5')]
+colnames(wb_go)<-c("ensembl","GO ID")
+dim(wb_go<-as.data.frame(wb_go))
+#remove duplicated entries (possibly from multiple lines of evidence)
+dim(wb_go<-wb_go[!duplicated(wb_go),])
+
+wb_go.list<-split(wb_go$`GO ID`,wb_go$ensembl)
+
+#List Terms for a gene
+anno87[grep("lin-41",anno87$wikigene_name),]
+go_terms[wb_go.list[["WBGene00003026"]]]
+
+anno87[grep("lin-29",anno87$wikigene_name),]
+go_terms[wb_go.list[["WBGene00003015"]]]
+
+#List Genes for a Term
+anno87[anno87$ensembl_gene_id %in% wb_go[grep("GO:0045138",wb_go$`GO ID`),"ensembl"],]
+
+save(wb_go,go_terms,file="wb_257_goterms.rdata")
+```
+
+## GO Analysis of each VENN category
+```{r GO,eval=T}
 load("wb_257_goterms.rdata")
 length(expressed_genes<-rownames(res_Lin41_dds87q4[res_Lin41_dds87q4$baseMean > 1,]))
+
+#alternatively insist on enough data to define p-value
 #length(expressed_genes<-rownames(res_Lin41_dds87q4[res_Lin41_dds87q4$baseMean > 1 & !is.na(res_Lin41_dds87q4$log2FoldChange) & !is.na(res_Lin41_dds87q4$padj) & !is.na(res_Oma1_dds87q4$log2FoldChange) & !is.na(res_Oma1_dds87q4$padj),]))
 
 dim(wb_go<-wb_go[wb_go$ensembl %in% expressed_genes,])
 wb_go.list<-split(wb_go$`GO ID`,wb_go$ensembl)
 
-
-#bias data
-bd<-sum(width(reduce(ens87)))
-bd<-bd[names(bd) %in% expressed_genes]
-length(bd)
-length(expressed_genes)
-head(bd)
-
-#degs
-table(degs<-as.numeric(expressed_genes %in% lin41_genesq4_exclusive ))
-names(degs)<-expressed_genes
-
-table(degs<-as.numeric(expressed_genes %in% oma1_genesq4_exclusive ))
-names(degs)<-expressed_genes
-
-table(degs<-as.numeric(expressed_genes %in% overlapq4 ))
-names(degs)<-expressed_genes
-
-listGO<-function(goid) {
+listGO<-function(goid,degs) {
   print(go_terms[goid])
   tg<-wb_go[grep(goid,wb_go$`GO ID`),"ensembl",drop=F]
-  idx<-match(tg$ensembl,annotations$ensembl_gene_id)
-  tg$symbol<-annotations[idx,"wikigene_name"]
+  idx<-match(tg$ensembl,anno87$ensembl_gene_id)
+  tg$symbol<-anno87[idx,"wikigene_name"]
   tg$deg<-degs[tg$ensembl]
   as.data.frame(tg)
 }
 
-listGO("GO:0045138")
-listGO("GO:1903864")
-listGO("GO:0007219")
+#degs_temp<-rep(NA,length(expressed_genes))
+#names(degs_temp)<-expressed_genes
+#listGO("GO:0045138",degs_temp)
 
-#GOseq
-pwf<-nullp(degs,bias.data=bd)
-GO.wall<-goseq(pwf,gene2cat=wb_go.list)
-GO.wall[1:20,c("category","term","numDEInCat","numInCat","over_represented_pvalue")]
+#bias data
+bd<-sum(width(reduce(ens87)))
+bd<-bd[names(bd) %in% expressed_genes]
 
-head(GO.wall,20) %>%
+#GOseq - Lin41 exclusive
+table(degs_lin41<-as.numeric(expressed_genes %in% lin41_genesq4_exclusive ))
+names(degs_lin41)<-expressed_genes
+lin41_GO<-goseq(nullp(degs_lin41,bias.data=bd),gene2cat=wb_go.list)
+lin41_GO[1:10,c("category","term","numDEInCat","numInCat","over_represented_pvalue")]
+
+listGO("GO:1903864",degs_lin41)
+
+#GOseq - Oma1 exclusive
+table(degs_oma1<-as.numeric(expressed_genes %in% oma1_genesq4_exclusive ))
+names(degs_oma1)<-expressed_genes
+oma1_GO<-goseq(nullp(degs_oma1,bias.data=bd),gene2cat=wb_go.list)
+oma1_GO[1:10,c("category","term","numDEInCat","numInCat","over_represented_pvalue")]
+
+listGO("GO:0007219",degs_oma1)
+
+#GOseq - overlap
+table(degs_overlap<-as.numeric(expressed_genes %in% overlapq4 ))
+names(degs_overlap)<-expressed_genes
+overlap_GO<-goseq(nullp(degs_overlap,bias.data=bd),gene2cat=wb_go.list)
+overlap_GO[1:10,c("category","term","numDEInCat","numInCat","over_represented_pvalue")]
+
+#horizontal bar plot
+head(lin41_GO,10) %>%
   dplyr::mutate(term=factor(term,levels=rev(term))) %>%
-ggplot(aes(x=term,y=-log10(over_represented_pvalue))) +
+  ggplot(aes(x=term,y=-log10(over_represented_pvalue))) +
   geom_bar(stat="identity",fill="red") +
-  coord_flip() + xlab("") +
-  theme_bw() 
+  coord_flip() + xlab("") + ggtitle("Enriched GO terms LIN-41 Exclusive Set") +
+  theme_bw()
+
+listGO("GO:0007538",degs_overlap)
+
 ```
+
+
+## MOTIF ANALYSIS
 
 # Download UTR sequences from biomaRt
 ```{r utr_biomart,eval=F}
@@ -343,10 +348,8 @@ seq5utr<-getSequence(id = expressed_transcripts$ensembl_transcript_id, type = "e
 save(seq3utr,seq5utr,file="utr_sequences.rdata")
 ```
 
-
-
 # Search for OMA-1 and LIN-41 Motifs in 3' UTRs
-```{r threeUTR}
+```{r threeUTR,eval=T}
 load("utr_sequences.rdata")
 
 #clean up UTR sequences
@@ -425,7 +428,7 @@ print(paste0("RNACompete Lin-41 motif enrichment in 3' UTR of Lin-41 Enriched Ge
 ```
 
 # # Search for OMA-1 and LIN-41 Motifs in 5' UTRs 
-```{r fiveUTR}
+```{r fiveUTR,eval=T}
 #clean up UTR sequences
 seq5utr<-seq5utr[seq5utr$`5utr`!="Sequence unavailable",]
 seq5utr<-seq5utr[nchar(seq5utr$`5utr`) >=8,]  # get rid of really short 3'UTRs
@@ -496,9 +499,8 @@ print(paste0("RNACompete Lin-41 motif enrichment in 5' UTR of Lin-41 Enriched Ge
 ```
 
 
-
-# explore UTR's of LIN-41 exclusive set
-```{r}
+# MEME de novo explore UTR's of LIN-41 exclusive set
+```{r meme,eval=F}
 
 #count UA[A/U]  "TAW" motif in each 5'utr
 seq5utr<-getSequence(id = lin41_genesq4_exclusive, type = "ensembl_gene_id", seqType = "5utr", mart = ensembl_87)
@@ -528,7 +530,7 @@ table(y<-unlist(lapply(seq5utrBS,function(x) countPWM(temp,x,min.score="80%"))))
 ```
 
 #meme
-```{r}
+```{r meme2,eval=F}
 motifSet <- runMEME(file.path(system.file("extdata",package="TFBSTools"), "crp0.s"),
                     binary="/usr/ngs/bin/meme/bin/meme",arguments=list("-nmotifs"=3))
 x<-readDNAStringSet(file.path(system.file("extdata",package="TFBSTools"), "crp0.s"))
@@ -559,225 +561,130 @@ plotMotifLogo(new("pfm",mat=t(t(temp[1:4,])*1/colSums(temp[1:4,])), name="3'UTR 
 
 ```
 
+# KIMBLE DATA
 
-## ###########  #########
+"Mon Dec 14 13:55:35 2015"
+```{r kimble_geoQuery,eval=F}
+system("wget 'http://trace.ncbi.nlm.nih.gov/Traces/sra/sra.cgi?save=efetch&rettype=runinfo&db=sra&term=SRP041461' -O sra.csv")
+system("wget 'http://trace.ncbi.nlm.nih.gov/Traces/sra/sra.cgi?save=efetch&rettype=runinfo&db=sra&term=SRX527966' -O sra.csv")
+View(sra<-read.csv("sra.csv",stringsAsFactors=F))
+sqlfile<-"/mnt/gcd/sradb/SRAmetadb.sqlite"
+if(!file.exists(sqlfile)) sqlfile <<- getSRAdbFile()
+sra_con <- dbConnect(SQLite(),sqlfile)
+conversion <- sraConvert('SRP041461', sra_con = sra_con )
+samples<-unique(conversion$experiment)
+dbListFields(sra_con,"experiment")
+sample_names<-list()
+#dbGetQuery(sra_con,paste0("select title from experiment where experiment_accession = 'SRX527966'"))
 
-#Is there a clever way to determine which transcript is expressed to know which UTR to use?
-```{r}
-d<-res_dds87q4[,]
-plot(d[,3],d[,2],cex=0.5,pch=16,ylim=c(-7,7),xlim=c(-7,7),
-     col=ifelse(rownames(d) %in% overlapq4,"blue",
-                ifelse(rownames(d) %in% oma1_genesq4_exclusive,"green",
-                ifelse(rownames(d) %in% lin41_genesq4_exclusive,"red","black"))))
-abline(a=0,b=1,col="red")
+for (i in 1:length(samples)) {
+  x<- dbGetQuery(sra_con,paste0("select title from experiment where experiment_accession = '",samples[i],"'"))
+  sample_names[[samples[i]]]<-sapply(strsplit(x[1,1],":|;"),function(x) x[2])
+}
 
-d<-as.data.frame(res_dds87q4[lin41_genesq4_exclusive,])
-idx<-match(rownames(d),annotations$ensembl_gene_id)
-d$wiki<-annotations[idx,"wikigene_name"]
-d$egn<-annotations[idx,"external_gene_name"]
-d$biotype<-annotations[idx,"transcript_biotype"]
-d<-d[with(d,order(-`Lin-41 IP`)),]
-View(d)
+for (i in samples) {
+  x<-conversion[grep(i,conversion$experiment),"run"]
+  print(paste0("samtools merge ", i,".bam ", x[1],".bam ",x[2],".bam ",x[3],".bam ",x[4],".bam "))
+}
 
-getSequence(rownames(d)[1:10], seqType = "5utr", mart = ensembl_87)
-
-tx87<-transcriptsBy(txdb, "gene")
-unlist(tx87[rownames(d[1:6,])])
-table(idx<-rownames(fiveUTRhits87_mapq_filter) %in% unlist(tx87[rownames(d[1:6,])])$tx_name )
-
-temp<-fiveUTRhits87_mapq_filter[idx,]
-
-fiveUTRhits87_mapq_filter["Y39A1A.12",]
-assays(fiveUTRhits87_mapq_filter["W03C9.4a",])$counts
-assays(fiveUTRhits87_mapq_filter["W03C9.4c",])$counts
+dbGetQuery(sra_con,paste0("select title from experiment where experiment_accession = 'SRX527966'"))
 ```
 
-
-
-#old summarizeOverlaps section to be deleted
-```{r summarizeOverlaps,eval=F}
-load("ens87.rdata")
-(fls <- list.files(".", pattern="*_q4.bam$",full=TRUE))
-fls <- fls[!grepl("PE",fls)]
+```{r summarizeOverlaps_kimble,eval=F}
+#Quantitate reads in all the merged SRX files (4 SRR files per SRX file)
+(fls <- list.files("../kimble", pattern=glob2rx("SRX*.bam"),full=TRUE))
 bamlst <- BamFileList(fls)
 detectCores()
 register(MulticoreParam(workers=detectCores()))
-genehits82 <- summarizeOverlaps(ens82,bamlst,mode="Union",singleEnd=TRUE,ignore.strand=TRUE)
-genehits82q4 <- summarizeOverlaps(ens82,bamlst,mode="Union",singleEnd=TRUE,ignore.strand=TRUE)
-#genehits <- summarizeOverlaps(ens87,bamlst,mode="Union",singleEnd=TRUE,ignore.strand=TRUE)
-head(assays(genehits82)$counts)
-apply(assays(genehits82)$counts,2,sum)
-save(genehits82,file= "genehits_ens82_WBcel235_010617.rdata")
-save(genehits,file= "genehits_ens87_WBcel235_010617.rdata")
+kimble82 <- summarizeOverlaps(ens82,bamlst,mode="Union",singleEnd=TRUE,ignore.strand=TRUE)
+save(kimble82,file="kimble_ens82_WBcel235_011017.rdata")
 ```
 
-# Do some QC on read counts
-```{r EDA, eval=T}
+```{r analyzeKimbleData,eval=T}
+load("./kimble_ens82_WBcel235_011017.rdata")
+kimble<-DESeqDataSet(kimble82,design=~1)
+file_names<-colnames(kimble)
+colnames(kimble)<-gsub("\\.bam","",file_names)
+kimble$title<-unlist(sample_names)[colnames(kimble)]
+kimble$filename<-file_names
+kimble$sex<-factor(substr(kimble$title,2,4))
+#sperm [fem-3(q96)] or oocytes [fog-2(q71)]
+design(kimble)<-(~sex)
+colData(kimble)
+plotPCA( DESeqTransform( kimble ),intgroup="sex")+
+  ggtitle("Kimble Data") + theme_bw()
+kimble<-DESeq(kimble)
+plotMA(kimble)
 
-#load("genehits_ens82_WBcel235_111815.rdata")
-#load("genehits_ens82_WBcel235_112515.rdata")
-#load("genehits_ens87_WBcel235_010617.rdata")
-#head(temp<-as.data.frame(assays(genehits)$counts))
-head(temp<-as.data.frame(assays(genehits82)$counts))
-
-summary(idx<-match(rownames(temp),type82$ensembl_gene_id))
-temp$biotype<-type82[idx,"transcript_biotype"]
-head(temp)
-
-colnames(temp)<-sapply(strsplit(colnames(temp),"_"),function(x) x[1]) %>%
-  gsub("2566","OMA-1_",.) %>% gsub("3923","LIN-41_",.) %>% gsub("IP4","OMA-1_042310",.)
-
-colors<-c("#cbc9e2","#9e9ac8","#6a51a3",
-          "#fdbe85","#fd8d3c","#d94701",
-          "#56B4E9", "#009E73","#F0E442", "#0072B2",
-          "black","red","green")
-
-gather(temp,sample,counts,-biotype) %>%
-  group_by(sample,biotype) %>%
-  summarize(countSum=sum(counts)) %>%
-  #filter(biotype!="rRNA") %>%
-  #filter(biotype!="protein_coding") %>%
-  #filter(biotype!="pseudogene") %>%
-  ggplot(aes(x=sample,y=countSum,fill=biotype)) +
-  scale_fill_manual(values=rev(colors),guide = guide_legend(reverse=TRUE)) +
-  geom_bar(stat="identity") + theme_classic() + theme(axis.text.x = element_text(angle = 90,  hjust = 0)) 
-```
-
-## Build DEseq object excluding rRNA but w/o fitering for uniquely mapped reads
-```{r}
-load("genehits_ens82_WBcel235_010617.rdata")
-apply(assays(genehits82)$counts,2,sum)
-temp<-as.data.frame(log2((assays(genehits82)$counts)+1))
-summary(temp)
-rownames(temp[rowMeans(temp)>19,])
-
-type<-getBM(filters="ensembl_gene_id",values=rownames(genehits82_mapq_filter), attributes=c("ensembl_gene_id","transcript_biotype"), mart=ensembl_82)
-table(type$transcript_biotype)
-
-idx<-match(rownames(genehits82),type$ensembl_gene_id)
-head(idx)
-genehits<-genehits82[type[idx,]$transcript_biotype != "rRNA",]
-dim(genehits)
-cds<-DESeqDataSet(genehits,design=~1)
-#colnames(cds)<-sapply(strsplit(colnames(cds),"_"),function(x) x[1])
-file_names<-colnames(cds)
-colnames(cds)<-sapply(strsplit(colnames(cds),"_"),function(x) x[1]) %>%
-  gsub("2566","OMA-1_",.) %>% gsub("3923","LIN-41_",.) %>% gsub("IP4","OMA-1_042310",.)
-
-cds$tag<-as.factor(c("OMA-1","OMA-1","LysRZ","Lys","LIN-41","LIN-41","LysRZ","Lys","OMA-1_042310"))
-cds$filename<-file_names
-design(cds)<-(~tag)
-colnames(cds)
-
-#get normalization factors for cds
-plotPCA( DESeqTransform( cds ),intgroup="tag")+
-  ggtitle("Greenstein RNP Purification") + theme_bw()
-cds<-DESeq(cds)
-colData(cds)
-round(colData(cds)$sizeFactor)
-
-
-#subset samples we are working with
-cds2<-cds[,c(1,2,3,5,6,7)]
-
-plotPCA( DESeqTransform( cds2 ),intgroup="tag")+
-  ggtitle("Greenstein RNP Purification") + theme_bw()
-
-cds2$tag <- droplevels(cds2$tag)
-cds2<-DESeq(cds2)
-plotMA(cds2,ylim=c(-8,8))
-resultsNames(cds)
-```
-
-
-
-
-"Mon Jan 30 14:36:09 2017"
-## Build DESeq object with uniquely mapping reads that are not rRNA
-```{r}
-apply(assays(genehits82_mapq_filter)$counts,2,sum)
-temp<-as.data.frame(log2((assays(genehits82_mapq_filter)$counts)+1))
-summary(temp)
-rownames(temp[rowMeans(temp)>19,])
-#annotations[grep("WBGene00004622",annotations$ensembl_gene_id),]
-#View(biomaRt::listAttributes(ensembl_82))
-
-#getBM(filters="ensembl_gene_id",values=rownames(temp[rowMeans(temp)>19,]), attributes=c("ensembl_gene_id","transcript_biotype"), mart=ensembl_82)
-type<-getBM(filters="ensembl_gene_id",values=rownames(genehits82_mapq_filter), attributes=c("ensembl_gene_id","transcript_biotype"), mart=ensembl_82)
-table(type$transcript_biotype)
-
-idx<-match(rownames(genehits82_mapq_filter),type$ensembl_gene_id)
-head(idx)
-genehits<-genehits82_mapq_filter[type[idx,]$transcript_biotype != "rRNA",]
-dim(genehits)
-cds<-DESeqDataSet(genehits,design=~1)
-#colnames(cds)<-sapply(strsplit(colnames(cds),"_"),function(x) x[1])
-file_names<-colnames(cds)
-colnames(cds)<-sapply(strsplit(colnames(cds),"_"),function(x) x[1]) %>%
-  gsub("2566","OMA-1_",.) %>% gsub("3923","LIN-41_",.) %>% gsub("IP4","OMA-1_042310",.)
-
-cds$tag<-as.factor(c("OMA-1","OMA-1","LysRZ","Lys","LIN-41","LIN-41","LysRZ","Lys","OMA-1_042310"))
-cds$filename<-file_names
-design(cds)<-(~tag)
-colnames(cds)
-
-#get normalization factors for cds
-plotPCA( DESeqTransform( cds ),intgroup="tag")+
-  ggtitle("Greenstein RNP Purification") + theme_bw()
-cds<-DESeq(cds)
-colData(cds)
-round(colData(cds)$sizeFactor)
-x<-colData(cds)
-save(x,file="/mnt/smb/micah/greenste_coldata.rdata")
-
-#subset samples we are working with
-cds2<-cds[,c(1,2,3,5,6,7)]
-
-plotPCA( DESeqTransform( cds2 ),intgroup="tag")+
-  ggtitle("Greenstein RNP Purification") + theme_bw()
-
-cds2$tag <- droplevels(cds2$tag)
-cds2<-DESeq(cds2)
-plotMA(cds2,ylim=c(-8,8))
-resultsNames(cds2)
-
-res<-results(cds,lfcThreshold=2,contrast=c("tag","OMA-1","LysRZ"))
+res<-results(kimble,lfcThreshold=1,contrast=c("sex","q96","q71"))
 res<-as.data.frame(res)
 res<-res[!is.na(res$padj),]
-res<-res[abs(res$log2FoldChange) > 2,]
-dim(res) #1190
-head(res<-res[with(res,order(padj)),])
-```
+#res<-res[abs(res$log2FoldChange) > 2,]
+#dim(res) #1190
+head(res<-res[with(res,order(-log2FoldChange)),])
 
-```{r}
-attrib<-listAttributes(ensembl_82)
-attrib[grep("Symbol",attrib[,2]),]
-head(annotations<-getBM(filters="ensembl_gene_id",values=names(ens82), attributes=c("ensembl_gene_id","wikigene_name","transcript_biotype","external_gene_name"), mart=ensembl_82))
-
-getBM(filters="ensembl_gene_id",values="WBGene00017498",attributes=c("ensembl_gene_id","wikigene_name","external_gene_name"),mart=ensembl_82)
-
-idx<-match(rownames(res),annotations$ensembl_gene_id)
-
-
-
-res$name<-annotations[idx,"wikigene_name"]
-res$type<-annotations[idx,"transcript_biotype"]
+idx<-match(rownames(res),anno87$ensembl_gene_id)
+res$name<-anno87[idx,"wikigene_name"]
+res$external_name<-anno87[idx,"external_gene_name"]
+res$type<-anno87[idx,"transcript_biotype"]
 head(res,20)
 
+genes_of_interest<-c("cpb-1","fog-1","fog-3","oma-1","pie-1","him-3","spo-11","C38C6.8","mab-3","spn-4")
+res[res$name %in% genes_of_interest,]
 
-write.csv(res,file="RNP_purification_112018.csv",quote=F)
+plot(res$log2FoldChange,-1*log10(res$padj),cex=0.5,pch=16)
+
+#Get average make and female fpkms
+kimble_fpkm<-as.data.frame(fpkm(kimble))
+(oocytes<-which(colData(kimble)[colnames(kimble_fpkm),"sex"]=="q71"))
+(sperm<-which(colData(kimble)[colnames(kimble_fpkm),"sex"]=="q96"))
+kimble_fpkm$oocytes<-apply(kimble_fpkm,1,function(x) mean(x[oocytes]))
+kimble_fpkm$sperm<-apply(kimble_fpkm,1,function(x) mean(x[sperm]))
+
+#merge with res
+idx<-match(rownames(res),rownames(kimble_fpkm))
+res$oocyte_fpkm<-round(kimble_fpkm[idx,"oocytes"],3)
+res$sperm_fpkm<-round(kimble_fpkm[idx,"sperm"],3)
+
+head(kimble_data<-res)
 ```
 
-#get normalized counts for 042310 Oma-1 sample
-```{r}
-cds<-DESeq(cds)
-cds_counts<-counts(cds,normalized=TRUE)
-head(oma1_042310<-log2(cds_counts[,9]+1)-0.5*log2(cds_counts[,3]+1)-0.5*log2(cds_counts[,7]+1))
+## Export Master Table and FPKM table
+
+## FPKM Table
+Do a merge to upload
+```{r exportFPKM,eval=F}
+head(temp<-read.csv(file="enrichment_relative_to_LysateRZ_112715.csv",stringsAsFactors=F,row.names=1))
+dim(temp)
+dim(kimble_data)
+idx<-match(rownames(temp),rownames(kimble_data))
+temp$gonad.baseMean<-kimble_data[idx,"baseMean"]
+temp$gonadLog2FoldChange<-kimble_data[idx,"log2FoldChange"]
+temp$gonadPadj<-kimble_data[idx,"padj"]
+head(temp)
+temp[temp$Gene.Name %in% genes_of_interest,]
+
+write.csv(temp,file="enrichment_relative_to_LysateRZ_withGonadEnrichment_121815.csv",quote=F)
+
+```
+
+## FPKM Table
+Add annotations and export the FPKMs
+```{r exportFPKM2,eval=F}
+#add annotations to f
+idx<-match(rownames(f),anno87$ensembl_gene_id)
+f$name<-anno87[idx,]$external_gene_name
+head(f)
+f[grep("mab-10",f$name),]
+f[grep("pud-4",f$name),]
+write.csv(f,file="fpkm_112715.csv",quote=F)
 ```
 
 
-#This sections calculates the Oma-1 and LIN-41 logFCs
-```{r}
+
+
+#kern smooth plot??
+```{r kernSmooth,eval=F}
 res<-results(cds2,lfcThreshold=2,contrast=c("tag","OMA-1","LysRZ"))
 res2<-results(cds2,lfcThreshold=2,contrast=c("tag","LIN-41","LysRZ"))
 dim(res2)
@@ -793,9 +700,9 @@ plot(logFCs[,2],logFCs[,1],cex=0.5,pch=16,xlab="Oma-1",ylab="Oma-1 042310",
 temp<-as.data.frame(logFCs[!(is.na(logFCs[,2]) | is.na(logFCs[,3])),])
 dim(temp)
 dim(temp<-temp[rowVars(temp)>6.5,])
-idx<-match(rownames(temp),annotations$ensembl_gene_id)
-temp$name<-annotations[idx,]$external_gene_name
-pheatmap(temp[,1:3],labels_row=annotations[idx,]$external_gene_name)
+idx<-match(rownames(temp),anno87$ensembl_gene_id)
+temp$name<-anno87[idx,]$external_gene_name
+pheatmap(temp[,1:3],labels_row=anno87[idx,]$external_gene_name)
 
 temp<-as.data.frame(logFCs[!(is.na(logFCs[,2]) | is.na(logFCs[,3])),])
 dim(temp<-temp[temp[,2]>4 | temp[,3] > 4,])
@@ -803,8 +710,8 @@ pheatmap(temp[,1:3],show_rownames=F)
 
 #output
 dim(temp<-as.data.frame(logFCs[!(is.na(logFCs[,2]) | is.na(logFCs[,3])),]))
-idx<-match(rownames(temp),annotations$ensembl_gene_id)
-temp$name<-annotations[idx,]$external_gene_name
+idx<-match(rownames(temp),anno87$ensembl_gene_id)
+temp$name<-anno87[idx,]$external_gene_name
 #dim(temp<-temp[temp[,2]>4 | temp[,3] > 4,])
 head(temp)
 colnames(temp)<-c("a","b","c","d")
@@ -817,7 +724,7 @@ write.csv(temp,file="enrichment_relative_to_LysateRZ_013117.csv",quote=F)
 ```
 
 ##100216
-```{r}
+```{r kernSmooth2,eval=F}
 #temp<-read.csv("enrichments_fpkms_112715 - Original Enrichment Relative to LysateRZ.csv",stringsAsFactors = F)
 #plot(temp$Oma.1.IP,temp$Lin.41.IP,cex=0.5,pch=16,xlab="Oma-1",ylab="Lin-41",
 #     main="Enrichment Relative to Ribozero Lysate")
@@ -873,113 +780,10 @@ ggplot(temp, aes(x=`Oma-1 IP`, y=`Lin-41 IP`)) + geom_point(size=0.5) +
 ```
 
 
-
-
-"Mon Dec 14 13:55:35 2015"
-```{r}
-system("wget 'http://trace.ncbi.nlm.nih.gov/Traces/sra/sra.cgi?save=efetch&rettype=runinfo&db=sra&term=SRP041461' -O sra.csv")
-system("wget 'http://trace.ncbi.nlm.nih.gov/Traces/sra/sra.cgi?save=efetch&rettype=runinfo&db=sra&term=SRX527966' -O sra.csv")
-View(sra<-read.csv("sra.csv",stringsAsFactors=F))
-sqlfile<-"/mnt/gcd/sradb/SRAmetadb.sqlite"
-if(!file.exists(sqlfile)) sqlfile <<- getSRAdbFile()
-sra_con <- dbConnect(SQLite(),sqlfile)
-conversion <- sraConvert('SRP041461', sra_con = sra_con )
-samples<-unique(conversion$experiment)
-dbListFields(sra_con,"experiment")
-sample_names<-list()
-#dbGetQuery(sra_con,paste0("select title from experiment where experiment_accession = 'SRX527966'"))
-
-for (i in 1:length(samples)) {
-  x<- dbGetQuery(sra_con,paste0("select title from experiment where experiment_accession = '",samples[i],"'"))
-  sample_names[[samples[i]]]<-sapply(strsplit(x[1,1],":|;"),function(x) x[2])
-}
-
-for (i in samples) {
-  x<-conversion[grep(i,conversion$experiment),"run"]
-  print(paste0("samtools merge ", i,".bam ", x[1],".bam ",x[2],".bam ",x[3],".bam ",x[4],".bam "))
-}
-
-dbGetQuery(sra_con,paste0("select title from experiment where experiment_accession = 'SRX527966'"))
-```
-
-```{r}
-#Quantitate reads in all the merged SRX files (4 SRR files per SRX file)
-(fls <- list.files("../kimble", pattern=glob2rx("SRX*.bam"),full=TRUE))
-bamlst <- BamFileList(fls)
-detectCores()
-register(MulticoreParam(workers=detectCores()))
-kimble82 <- summarizeOverlaps(ens82,bamlst,mode="Union",singleEnd=TRUE,ignore.strand=TRUE)
-save(kimble82,file="kimble_ens82_WBcel235_011017.rdata")
-load("./kimble_ens82_WBcel235_011017.rdata")
-kimble<-DESeqDataSet(kimble82,design=~1)
-file_names<-colnames(kimble)
-colnames(kimble)<-gsub("\\.bam","",file_names)
-kimble$title<-unlist(sample_names)[colnames(kimble)]
-kimble$filename<-file_names
-kimble$sex<-factor(substr(kimble$title,2,4))
-#sperm [fem-3(q96)] or oocytes [fog-2(q71)]
-design(kimble)<-(~sex)
-colData(kimble)
-plotPCA( DESeqTransform( kimble ),intgroup="sex")+
-  ggtitle("Kimble Data") + theme_bw()
-kimble<-DESeq(kimble)
-plotMA(kimble)
-
-res<-results(kimble,lfcThreshold=1,contrast=c("sex","q96","q71"))
-res<-as.data.frame(res)
-res<-res[!is.na(res$padj),]
-#res<-res[abs(res$log2FoldChange) > 2,]
-#dim(res) #1190
-head(res<-res[with(res,order(-log2FoldChange)),])
-
-idx<-match(rownames(res),annotations$ensembl_gene_id)
-res$name<-annotations[idx,"wikigene_name"]
-res$external_name<-annotations[idx,"external_gene_name"]
-res$type<-annotations[idx,"transcript_biotype"]
-head(res,20)
-
-genes_of_interest<-c("cpb-1","fog-1","fog-3","oma-1","pie-1","him-3","spo-11","C38C6.8","mab-3","spn-4")
-res[res$name %in% genes_of_interest,]
-
-plot(res$log2FoldChange,-1*log10(res$padj),cex=0.5,pch=16)
-
-#Get average make and female fpkms
-kimble_fpkm<-as.data.frame(fpkm(kimble))
-(oocytes<-which(colData(kimble)[colnames(kimble_fpkm),"sex"]=="q71"))
-(sperm<-which(colData(kimble)[colnames(kimble_fpkm),"sex"]=="q96"))
-kimble_fpkm$oocytes<-apply(kimble_fpkm,1,function(x) mean(x[oocytes]))
-kimble_fpkm$sperm<-apply(kimble_fpkm,1,function(x) mean(x[sperm]))
-
-#merge with res
-idx<-match(rownames(res),rownames(kimble_fpkm))
-res$oocyte_fpkm<-round(kimble_fpkm[idx,"oocytes"],3)
-res$sperm_fpkm<-round(kimble_fpkm[idx,"sperm"],3)
-
-head(kimble_data<-res)
-```
-
-
-
-Do a merge to upload
-```{r}
-head(temp<-read.csv(file="enrichment_relative_to_LysateRZ_112715.csv",stringsAsFactors=F,row.names=1))
-dim(temp)
-dim(kimble_data)
-idx<-match(rownames(temp),rownames(kimble_data))
-temp$gonad.baseMean<-kimble_data[idx,"baseMean"]
-temp$gonadLog2FoldChange<-kimble_data[idx,"log2FoldChange"]
-temp$gonadPadj<-kimble_data[idx,"padj"]
-head(temp)
-temp[temp$Gene.Name %in% genes_of_interest,]
-
-write.csv(temp,file="enrichment_relative_to_LysateRZ_withGonadEnrichment_121815.csv",quote=F)
-
-```
-
 "Tue Jan 10 11:38:52 2017"
 I have sat down to try to write the RNAseq section of the Results. I am trying to do as much as I can myself, to make this most efficient for you. I am beginning by doing what I can and organizing things and making an outline (before actually writing). I am looking through the data to see if I can distinguish the obvious lin-41 somatic targets in the heterochronic pathway (i.e., lin-29 and mab-10) from oocyte targets. I am wondering whether I could get a file very similar to the enrichments_fpkms_112715 file but with the  Kimble log2 oocyte enrichment in the spreadsheet with the fpkms in the ip and lysate. The reason is I am thinking of binning mRNAs enriched in the LIN-41 IP by abundance in the IP and then in each group scoring oocyte enrichment (like Figure 3C in Spike et al, 2014a). Does this make sense?
 
-```{r}
+```{r oocyte_abundance,eval=F}
 #need abundance in the lin-41 IP samples vs enrichment 
 temp2<-as.data.frame(temp)
 
@@ -1037,7 +841,7 @@ dev.off()
 Make a barplot showing the bias for Oocyte specific genes in the IP'd RNPs.  The point here is to determine if the RNPs are loaded in a biased way with transcripts involved in oogenesis.  Spike et al originally showed this by seeing how many oogenic genes were in each "bin" of the transcripts present in the IP.  But very low abundance transcripts that are oocyte enriched may have large enrichments in the RNPs that would be lost by just binning the IP transcripts by abundance.  Probably need to look at it both ways and see if a clear trend is present.
 
 Rethink - these RNPs are clearly going to be loaded with oocyte genes since the expression of the tagged construct is mostly oocyte.   It is really just a control to show that the enriched genes are (IP vs lysate) are 
-```{r}
+```{r oocyte_volcano,eval=F}
 #try a volcano on the kimble data
 temp2 %>%  
  # mutate(kimble_log2FC=ifelse(is.na(kimble_log2FC),0,kimble_log2FC)) %>% # set NA's to 0 difference
@@ -1049,7 +853,7 @@ temp2 %>%
   theme_bw()
 ```
 
-```{r barplot}
+```{r barplot,eval=F}
 #make the barplot
 temp2 %>% 
   dplyr::select(oma1_ip_mean,lin41_ip_mean,oocyte_fpkm) %>% 
@@ -1066,138 +870,4 @@ temp2 %>%
   theme(axis.text.x = element_text(angle = 90,  hjust = 0)) 
 
 ```
-
-## FPKM Table
-Add annotations and export the FPKMs
-```{r}
-#add annotations to f
-idx<-match(rownames(f),annotations$ensembl_gene_id)
-f$name<-annotations[idx,]$external_gene_name
-head(f)
-f[grep("mab-10",f$name),]
-f[grep("pud-4",f$name),]
-write.csv(f,file="fpkm_112715.csv",quote=F)
-```
-
-#Venn Diagrams
-```{r}
-lfc<-2
-#x<-nrow(temp[temp$Lin.41.IP > lfc,])
-#y<-nrow(temp[temp$Oma.1.IP > lfc,])
-#z<-nrow(temp[temp$Lin.41.IP > lfc & temp$Oma.1.IP > lfc,])
-(x<-nrow(temp[temp$`Lin-41 IP`> lfc,]))
-(y<-nrow(temp[temp$`Oma-1 IP` > lfc,]))
-(z<-nrow(temp[temp$`Lin-41 IP` > lfc & temp$`Oma-1 IP` > lfc,]))
-#svglite("testplot.svg")
-grid.newpage()
-vennplot <- draw.pairwise.venn(x,y,z, c("Lin-41", "Oma-1"))
-#dev.off()
-
-write.csv(temp[temp$Lin.41.IP > lfc | temp$Oma.1.IP > lfc,],file="enrichment_4fold.csv",quote=F)
-
-temp[temp$Gene.Name %in% c("cdc-25.3", "zif-1","rnp-1"),]
-
-
-```
-
-
-"Fri Jan 27 13:31:58 2017"
-## GO Analysis
-```{r eval=F}
-downloader::download("ftp://ftp.wormbase.org/pub/wormbase/releases/WS257/ONTOLOGY/gene_association.WS257.wb",
-                     "gene_association.WS257.wb")
-downloader::download("ftp://ftp.wormbase.org/pub/wormbase/releases/WS257/ONTOLOGY/gene_ontology.WS257.obo",
-                     "gene_ontology.WS257.obo")
-
-ga<-readr::read_delim("gene_association.WS257.wb",skip=3,delim="\t",col_names=F)
-
-#Scan in OBO file to get Biological Process terms
-t1<-readLines("gene_ontology.WS257.obo",n=-1L)
-terms<-list()
-
-for (i in seq_along(1:length(t1))) {
-  if (t1[i]=="[Term]") {
-    gt<-substr(t1[i+1],5,14)
-    name<-gsub("name: ","",t1[i+2])
-    if (t1[i+3]=="namespace: biological_process") { 
-      #print (paste0(gt,":  ",name)) 
-      terms[[gt]]<-name
-    }
-    }
-}
-go_terms<-unlist(terms)
-
-head(ga)
-wb_go<-ga[ga$'X5' %in% names(go_terms),c('X2','X5')]
-colnames(wb_go)<-c("ensembl","GO ID")
-dim(wb_go<-as.data.frame(wb_go))
-#remove duplicated entries (possibly from multiple lines of evidence)
-dim(wb_go<-wb_go[!duplicated(wb_go),])
-
-wb_go.list<-split(wb_go$`GO ID`,wb_go$ensembl)
-
-#List Terms for a gene
-annotations[grep("lin-41",annotations$wikigene_name),]
-go_terms[wb_go.list[["WBGene00003026"]]]
-
-annotations[grep("lin-29",annotations$wikigene_name),]
-go_terms[wb_go.list[["WBGene00003015"]]]
-
-#List Genes for a Term
-annotations[annotations$ensembl_gene_id %in% wb_go[grep("GO:0045138",wb_go$`GO ID`),"ensembl"],]
-
-save(wb_go,go_terms,file="wb_257_goterms.rdata")
-```
-
-#Run goseq
-```{r}
-load("wb_257_goterms.rdata")
-length(expressed_genes<-rownames(res[res$baseMean > 1 & !is.na(res$log2FoldChange) & !is.na(res$padj),]))
-dim(wb_go<-wb_go[wb_go$ensembl %in% expressed_genes,])
-wb_go.list<-split(wb_go$`GO ID`,wb_go$ensembl)
-
-
-#bias data
-bd<-sum(width(reduce(ens82)))
-bd<-bd[names(bd) %in% expressed_genes]
-length(bd)
-length(expressed_genes)
-head(bd)
-
-#degs
-temp<-res[expressed_genes,]
-temp_deg<-subset(temp,temp$padj < 0.05 & abs(temp$log2FoldChange ) > 1)
-degs<-as.numeric(rownames(temp) %in% rownames(temp_deg))
-names(degs)<-rownames(temp)
-length(degs)
-table(degs)
-
-listGO<-function(goid) {
-  print(go_terms[goid])
-  tg<-wb_go[grep(goid,wb_go$`GO ID`),"ensembl",drop=F]
-  idx<-match(tg$ensembl,annotations$ensembl_gene_id)
-  tg$symbol<-annotations[idx,"wikigene_name"]
-  tg$deg<-degs[tg$ensembl]
-  as.data.frame(tg)
-}
-
-listGO("GO:0045138")
-
-#GOseq
-pwf<-nullp(degs,bias.data=bd)
-
-GO.wall<-goseq(pwf,gene2cat=wb_go.list)
-
-GO.wall[1:20,c("category","term","numDEInCat","numInCat","over_represented_pvalue")]
-
-head(GO.wall,20) %>%
-  dplyr::mutate(term=factor(term,levels=rev(term))) %>%
-ggplot(aes(x=term,y=-log10(over_represented_pvalue))) +
-  geom_bar(stat="identity",fill="red") +
-  coord_flip() + xlab("") +
-  theme_bw() 
-
-```
-
-
 
