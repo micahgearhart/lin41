@@ -100,7 +100,7 @@ save(genehits87,genehits87_mapq_filter,file=paste0("genehits87_",ts,".rdata"))
 ```
 
 ## Compare the biotype Distributions across samples with and without a MAPQ filter
-```{r eda,eval=T}
+```{r eda,eval=T,fig.height=10,fig.width=6}
 load("ens87.rdata")
 load("genehits87_Mon_Feb_06_2017_1446.rdata")
 
@@ -125,7 +125,9 @@ g2<-tidyr::gather(counts87q4,sample,counts,-biotype) %>%
   scale_fill_manual(values=rev(cbPalette2),guide = guide_legend(reverse=TRUE)) +
   geom_bar(stat="identity") + theme_classic() + theme(axis.text.x = element_text(angle = 90,  hjust = 0)) 
 
-grid.arrange(g1,g2,ncol=1)
+g1
+g2
+#grid.arrange(g1,g2,ncol=1)
 ```
 
 
@@ -186,13 +188,19 @@ colnames(res_dds87q4)<-c("Oma-1 042310","Oma-1 IP","Lin-41 IP")
 
 ## Quick look at enrichment in old vs new data
 ```{r quickscatter,eval=T}
+idx<-!(is.na(res_dds87q4[,2]) | is.na(res_dds87q4[,3]))
+corr_oma_v_lin<-cor(res_dds87q4[idx,2],res_dds87q4[idx,3],method="spearman")
+corr_oma_v_oma<-cor(res_dds87q4[idx,2],res_dds87q4[idx,1],method="spearman")
+
 plot(res_dds87q4[,2],res_dds87q4[,3],cex=0.5,pch=16,xlab="Oma-1",ylab="Lin-41",
      main="Enrichment Relative to Ribozero Lysate")
+text(-6,5,paste0("Spearman correlation:  ",round(corr_oma_v_lin,3)),col="blue")
+
 
 plot(res_dds87q4[,2],res_dds87q4[,1],cex=0.5,pch=16,xlab="Oma-1",ylab="Oma-1 042310",
      main="Enrichment Relative to Ribozero Lysate")
+text(-6,5,paste0("Spearman correlation:  ",round(corr_oma_v_oma,3)),col="blue")
 ```
-
 
 
 
@@ -237,7 +245,7 @@ res_dds87q4$lin41_fpkm<-round(dds87q4_fpkm[idx,"lin41"],2)
 ```
 
 ## Heatmaps of High Log2FC or High Variance Genes
-```{r heatmap,eval=T}
+```{r heatmap,eval=T,fig.height=10,fig.width=6}
 #log2 fold change in eiter sample
 dim(temp<-res_dds87q4[!(is.na(res_dds87q4[,2]) | is.na(res_dds87q4[,3])),])
 dim(temp<-temp[temp[,2]>2 | temp[,3] > 2,])
@@ -464,45 +472,47 @@ table(as.logical(seq3utr$loedige))
 temp<-seq3utr %>% group_by(ensembl_gene_id) %>% 
   summarize(taw_log=as.logical(sum(taw)),loedige_log=as.logical(sum(loedige))) %>% as.data.frame
 
-a<-sum(temp[temp$ensembl_gene_id %in% oma1_genes,"taw_log"])
-b<-sum(temp[!temp$ensembl_gene_id %in% oma1_genes,"taw_log"])
-c<-sum(oma1_genes %in% temp$ensembl_gene_id)
+a<-sum(temp[temp$ensembl_gene_id %in% oma1q4_genes,"taw_log"])
+b<-sum(temp[!temp$ensembl_gene_id %in% oma1q4_genes,"taw_log"])
+c<-sum(oma1q4_genes %in% temp$ensembl_gene_id)
 d<-sum(expressed_genes %in% temp$ensembl_gene_id)
 
 (x<-matrix(c(d-b-c,b,c-a,a),ncol=2))
 (oma1_taw_3p_test<-fisher.test(x))
 
 #oma-1 loedige
-a<-sum(temp[temp$ensembl_gene_id %in% oma1_genes,"loedige_log"])
-b<-sum(temp[!temp$ensembl_gene_id %in% oma1_genes,"loedige_log"])
-c<-sum(oma1_genes %in% temp$ensembl_gene_id)
+a<-sum(temp[temp$ensembl_gene_id %in% oma1q4_genes,"loedige_log"])
+b<-sum(temp[!temp$ensembl_gene_id %in% oma1q4_genes,"loedige_log"])
+c<-sum(oma1q4_genes %in% temp$ensembl_gene_id)
 d<-sum(expressed_genes %in% temp$ensembl_gene_id)
 
 (x<-matrix(c(d-b-c,b,c-a,a),ncol=2))
 (oma1_loedige_3p_test<-fisher.test(x))
 
 #lin41 TAW
-a<-sum(temp[temp$ensembl_gene_id %in% lin41_genes,"taw_log"])
-b<-sum(temp[!temp$ensembl_gene_id %in% lin41_genes,"taw_log"])
-c<-sum(lin41_genes %in% temp$ensembl_gene_id)
+a<-sum(temp[temp$ensembl_gene_id %in% lin41q4_genes,"taw_log"])
+b<-sum(temp[!temp$ensembl_gene_id %in% lin41q4_genes,"taw_log"])
+c<-sum(lin41q4_genes %in% temp$ensembl_gene_id)
 d<-sum(expressed_genes %in% temp$ensembl_gene_id)
 
 (x<-matrix(c(d-b-c,b,c-a,a),ncol=2))
 (lin41_taw_3p_test<-fisher.test(x))
 
 #lin41 loedige
-a<-sum(temp[temp$ensembl_gene_id %in% lin41_genes,"loedige_log"])
-b<-sum(temp[!temp$ensembl_gene_id %in% lin41_genes,"loedige_log"])
-c<-sum(lin41_genes %in% temp$ensembl_gene_id)
+a<-sum(temp[temp$ensembl_gene_id %in% lin41q4_genes,"loedige_log"])
+b<-sum(temp[!temp$ensembl_gene_id %in% lin41q4_genes,"loedige_log"])
+c<-sum(lin41q4_genes %in% temp$ensembl_gene_id)
 d<-sum(expressed_genes %in% temp$ensembl_gene_id)
 
 (x<-matrix(c(d-b-c,b,c-a,a),ncol=2))
 (lin41_loedige_3p_test<-fisher.test(x))
 
-print(paste0("TAW motif enrichment in 3' UTR of Oma1 Enriched Genes:  ",oma1_taw_3p_test$p.value))
-print(paste0("RNAcompete Lin-41 motif enrichment in 3' UTR of Oma1 Enriched Genes:  ",oma1_loedige_3p_test$p.value))
-print(paste0("TAW motif enrichment in 3' UTR of Lin-41 Enriched Genes:  ",lin41_taw_3p_test$p.value))
-print(paste0("RNACompete Lin-41 motif enrichment in 3' UTR of Lin-41 Enriched Genes:  ",lin41_loedige_3p_test$p.value))
+x<-round(data.frame(pvalue=c(oma1_taw_3p_test$p.value,oma1_loedige_3p_test$p.value,lin41_taw_3p_test$p.value,lin41_loedige_3p_test$p.value)),5)
+rownames(x)<-c("TAW motif enrichment in 3' UTR of Oma1 Enriched Genes",
+               "RNAcompete Lin-41 motif enrichment in 3' UTR of Oma1 Enriched Genes",
+               "TAW motif enrichment in 3' UTR of Lin-41 Enriched Genes",
+               "RNACompete Lin-41 motif enrichment in 3' UTR of Lin-41 Enriched Gene")
+knitr::kable(x)
 ```
 
 ## Search for OMA-1 and LIN-41 Motifs in 5' UTRs 
@@ -535,96 +545,74 @@ table(as.logical(seq5utr$loedige))
 temp<-seq5utr %>% group_by(ensembl_gene_id) %>% 
   summarize(taw_log=as.logical(sum(taw)),loedige_log=as.logical(sum(loedige))) %>% as.data.frame
 
-a<-sum(temp[temp$ensembl_gene_id %in% oma1_genes,"taw_log"])
-b<-sum(temp[!temp$ensembl_gene_id %in% oma1_genes,"taw_log"])
-c<-sum(oma1_genes %in% temp$ensembl_gene_id)
+a<-sum(temp[temp$ensembl_gene_id %in% oma1q4_genes,"taw_log"])
+b<-sum(temp[!temp$ensembl_gene_id %in% oma1q4_genes,"taw_log"])
+c<-sum(oma1q4_genes %in% temp$ensembl_gene_id)
 d<-sum(expressed_genes %in% temp$ensembl_gene_id)
 
 (x<-matrix(c(d-b-c,b,c-a,a),ncol=2))
 (oma1_taw_5p_test<-fisher.test(x))
 
 #oma-1 loedige
-a<-sum(temp[temp$ensembl_gene_id %in% oma1_genes,"loedige_log"])
-b<-sum(temp[!temp$ensembl_gene_id %in% oma1_genes,"loedige_log"])
-c<-sum(oma1_genes %in% temp$ensembl_gene_id)
+a<-sum(temp[temp$ensembl_gene_id %in% oma1q4_genes,"loedige_log"])
+b<-sum(temp[!temp$ensembl_gene_id %in% oma1q4_genes,"loedige_log"])
+c<-sum(oma1q4_genes %in% temp$ensembl_gene_id)
 d<-sum(expressed_genes %in% temp$ensembl_gene_id)
 
 (x<-matrix(c(d-b-c,b,c-a,a),ncol=2))
 (oma1_loedige_5p_test<-fisher.test(x))
 
 #lin41 TAW
-a<-sum(temp[temp$ensembl_gene_id %in% lin41_genes,"taw_log"])
-b<-sum(temp[!temp$ensembl_gene_id %in% lin41_genes,"taw_log"])
-c<-sum(lin41_genes %in% temp$ensembl_gene_id)
+a<-sum(temp[temp$ensembl_gene_id %in% lin41q4_genes,"taw_log"])
+b<-sum(temp[!temp$ensembl_gene_id %in% lin41q4_genes,"taw_log"])
+c<-sum(lin41q4_genes %in% temp$ensembl_gene_id)
 d<-sum(expressed_genes %in% temp$ensembl_gene_id)
 
 (x<-matrix(c(d-b-c,b,c-a,a),ncol=2))
 (lin41_taw_5p_test<-fisher.test(x))
 
 #lin41 loedige
-a<-sum(temp[temp$ensembl_gene_id %in% lin41_genes,"loedige_log"])
-b<-sum(temp[!temp$ensembl_gene_id %in% lin41_genes,"loedige_log"])
-c<-sum(lin41_genes %in% temp$ensembl_gene_id)
+a<-sum(temp[temp$ensembl_gene_id %in% lin41q4_genes,"loedige_log"])
+b<-sum(temp[!temp$ensembl_gene_id %in% lin41q4_genes,"loedige_log"])
+c<-sum(lin41q4_genes %in% temp$ensembl_gene_id)
 d<-sum(expressed_genes %in% temp$ensembl_gene_id)
 
 (x<-matrix(c(d-b-c,b,c-a,a),ncol=2))
 (lin41_loedige_5p_test<-fisher.test(x))
 
-print(paste0("TAW motif enrichment in 5' UTR of Oma1 Enriched Genes:  ",oma1_taw_5p_test$p.value))
-print(paste0("RNAcompete Lin-41 motif enrichment in 5' UTR of Oma1 Enriched Genes:  ",oma1_loedige_5p_test$p.value))
-print(paste0("TAW motif enrichment in Lin-41 5' UTR of Enriched Genes:  ",lin41_taw_5p_test$p.value))
-print(paste0("RNACompete Lin-41 motif enrichment in 5' UTR of Lin-41 Enriched Genes:  ",lin41_loedige_5p_test$p.value))
+x<-round(data.frame(pvalue=c(oma1_taw_5p_test$p.value,oma1_loedige_5p_test$p.value,lin41_taw_5p_test$p.value,lin41_loedige_5p_test$p.value)),5)
+rownames(x)<-c("TAW motif enrichment in 5' UTR of Oma1 Enriched Genes",
+               "RNAcompete Lin-41 motif enrichment in 5' UTR of Oma1 Enriched Genes",
+               "TAW motif enrichment in 5' UTR of Lin-41 Enriched Genes",
+               "RNACompete Lin-41 motif enrichment in 5' UTR of Lin-41 Enriched Gene")
+knitr::kable(x)
 ```
 
 
-# MEME de novo explore UTR's of LIN-41 exclusive set
-```{r meme,eval=F}
+## MEME de novo explore UTR's of LIN-41 exclusive set
 
-#count UA[A/U]  "TAW" motif in each 5'utr
-seq5utr<-getSequence(id = lin41_genesq4_exclusive, type = "ensembl_gene_id", seqType = "5utr", mart = ensembl_87)
-seq5utr<-seq5utr[seq5utr$`5utr`!="Sequence unavailable",]
-summary(nchar(seq5utr$`5utr`))
-seq5utrBS<-DNAStringSet(seq5utr$`5utr`)
-seq5utr$taw<-vcountPattern("TAW",seq5utrBS,fixed=FALSE)
+```{r run_meme,eval=F}
 
-#count UA[A/U]  "TAW" motif in each 5'utr
-seq3utr<-getSequence(id = lin41_genesq4_exclusive, type = "ensembl_gene_id", seqType = "3utr", mart = ensembl_87)
-seq3utr<-seq3utr[seq3utr$`3utr`!="Sequence unavailable",]
-summary(nchar(seq3utr$`3utr`))
+length(lin41q4_exclusive_3p_BS<-seq3utrBS[seq3utr[seq3utr$ensembl_gene_id %in% lin41q4_genes_exclusive,"ensembl_transcript_id"]])
+length(lin41_3p_BS<-seq3utrBS[seq3utr[seq3utr$ensembl_gene_id %in% lin41q4_genes,"ensembl_transcript_id"]])
 
-#count UA[A/U]  "TAW" motif in each 5'utr
-seq3utrBS<-DNAStringSet(seq3utr$`3utr`)
-seq3utr$taw<-vcountPattern("TAW",seq3utrBS,fixed=FALSE)
-
-rnaCompeteMotif<-RNAStringSet(c("GCAAAGC","GUAAAAC","GUAUAAC","GCAUAGC","CUUUAAG"))
-temp<-consensusMatrix(rnaCompeteMotif)[1:4,]
-plotMotifLogo(new("pfm",mat=t(t(temp[1:4,])*1/colSums(temp[1:4,])), name="RNAcompeteMotif"))
-
-temp<-consensusMatrix(DNAStringSet(rnaCompeteMotif))[1:4,]
-x<-countPWM(temp,seq3utrBS[[1]],min.score="80%", with.score=FALSE)
-
-table(x<-unlist(lapply(seq3utrBS,function(x) countPWM(temp,x,min.score="80%"))))
-table(y<-unlist(lapply(seq5utrBS,function(x) countPWM(temp,x,min.score="80%"))))
+motifSet_lin41_3utr_exclusive <- runMEME(lin41q4_exclusive_3p_BS, binary="/usr/ngs/bin/meme/bin/meme",arguments=list("-nmotifs"=3,"-maxsize"=1e16))
+motifSet_lin41_3utr_full <- runMEME(lin41_3p_BS, binary="/usr/ngs/bin/meme/bin/meme",arguments=list("-nmotifs"=3,"-maxsize"=1e16,,"-w"=7))
+save(motifSet_lin41_3utr,motifSet_lin41_3utr_full,file="motifsets_lin41_3pUTR.rdata")
 ```
 
-#meme
-```{r meme2,eval=F}
-motifSet <- runMEME(file.path(system.file("extdata",package="TFBSTools"), "crp0.s"),
-                    binary="/usr/ngs/bin/meme/bin/meme",arguments=list("-nmotifs"=3))
-x<-readDNAStringSet(file.path(system.file("extdata",package="TFBSTools"), "crp0.s"))
 
-motifSet <- runMEME(x, binary="/usr/ngs/bin/meme/bin/meme",arguments=list("-nmotifs"=3))
+## Analyze Meme findings
+```{r analyze_meme,eval=F}
+load("motifsets_lin41_3pUTR.rdata")
 
-names(seq3utrBS)<-paste0("seq3utr_",1:length(seq3utrBS))
-summary(width(seq3utrBS))
-seq3utrBS<-seq3utrBS[width(seq3utrBS)>= 8]
-writeXStringSet(seq3utrBS,file="test3p.fasta")
-motifSet_3utr <- runMEME(seq3utrBS, binary="/usr/ngs/bin/meme/bin/meme",arguments=list("-nmotifs"=3,"-maxsize"=10000000000000000,"-w"=5))
-motifSet_3utr <- runMEME(seq3utrBS, binary="/usr/ngs/bin/meme/bin/meme",arguments=list("-nmotifs"=3,"-maxsize"=10000000000000000))
+motif2pfm<-function(m) {
+  temp<-consensusMatrix(m)
+  #rownames(temp)<-c("A","C","G","U")
+  new("pfm",mat=t(t(temp[1:4,])*1/colSums(temp[1:4,])), name="3'UTR motif")
+  }
 
-(temp<-consensusMatrix(motifSet_3utr)[[2]])
-rownames(temp)<-c("A","C","G","U")
-plotMotifLogo(new("pfm",mat=t(t(temp[1:4,])*1/colSums(temp[1:4,])), name="3'UTR motif"))
+plotMotifLogo(motif2pfm(motifSet_lin41_3utr_exclusive[[1]]))
 
 seq5utrBS<-seq5utrBS[width(seq5utrBS)>= 8]
 names(seq5utrBS)<-paste0("seq5utr_",1:length(seq5utrBS))
@@ -701,7 +689,7 @@ colData(kimble)
 plotPCA( DESeqTransform( kimble ),intgroup="sex")+
   ggtitle("Kimble Data") + theme_bw()
 kimble<-DESeq(kimble)
-plotMA(kimble)
+plotMA(kimble,ylim=c(-14,14))
 
 res_kimble<-results(kimble,lfcThreshold=1,contrast=c("sex","q96","q71"))
 res_kimble<-as.data.frame(res_kimble)
@@ -780,8 +768,11 @@ g4<-res_dds87q4 %>%
   scale_colour_gradient2(low = "red2", mid = "white", high = "darkblue") +
   theme_bw()
 
+g3
+g4
+
 #svglite("testplot.svg",width=10,height=8)
-grid.arrange(g4,g3,ncol=2)
+#grid.arrange(g4,g3,ncol=2)
 #dev.off()
 ```
 
@@ -826,7 +817,9 @@ g6<-res_dds87q4  %>%
   scale_colour_gradient2(low = "red2", mid = "white", high = "darkblue") +
   theme_bw()
 
-grid.arrange(g5,g6,ncol=2)
+g5
+g6
+#grid.arrange(g5,g6,ncol=2)
 ```
 
 

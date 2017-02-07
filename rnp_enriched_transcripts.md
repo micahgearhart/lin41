@@ -129,10 +129,20 @@ g2<-tidyr::gather(counts87q4,sample,counts,-biotype) %>%
   scale_fill_manual(values=rev(cbPalette2),guide = guide_legend(reverse=TRUE)) +
   geom_bar(stat="identity") + theme_classic() + theme(axis.text.x = element_text(angle = 90,  hjust = 0)) 
 
-grid.arrange(g1,g2,ncol=1)
+g1
 ```
 
 ![](rnp_enriched_transcripts_files/figure-html/eda-1.png)<!-- -->
+
+```r
+g2
+```
+
+![](rnp_enriched_transcripts_files/figure-html/eda-2.png)<!-- -->
+
+```r
+#grid.arrange(g1,g2,ncol=1)
+```
 
 
 ## Filter out rRNA genes and analyze for Enrichment relative to Input
@@ -300,8 +310,13 @@ colnames(res_dds87q4)<-c("Oma-1 042310","Oma-1 IP","Lin-41 IP")
 ## Quick look at enrichment in old vs new data
 
 ```r
+idx<-!(is.na(res_dds87q4[,2]) | is.na(res_dds87q4[,3]))
+corr_oma_v_lin<-cor(res_dds87q4[idx,2],res_dds87q4[idx,3],method="spearman")
+corr_oma_v_oma<-cor(res_dds87q4[idx,2],res_dds87q4[idx,1],method="spearman")
+
 plot(res_dds87q4[,2],res_dds87q4[,3],cex=0.5,pch=16,xlab="Oma-1",ylab="Lin-41",
      main="Enrichment Relative to Ribozero Lysate")
+text(-6,5,paste0("Spearman correlation:  ",round(corr_oma_v_lin,3)),col="blue")
 ```
 
 ![](rnp_enriched_transcripts_files/figure-html/quickscatter-1.png)<!-- -->
@@ -309,10 +324,10 @@ plot(res_dds87q4[,2],res_dds87q4[,3],cex=0.5,pch=16,xlab="Oma-1",ylab="Lin-41",
 ```r
 plot(res_dds87q4[,2],res_dds87q4[,1],cex=0.5,pch=16,xlab="Oma-1",ylab="Oma-1 042310",
      main="Enrichment Relative to Ribozero Lysate")
+text(-6,5,paste0("Spearman correlation:  ",round(corr_oma_v_oma,3)),col="blue")
 ```
 
 ![](rnp_enriched_transcripts_files/figure-html/quickscatter-2.png)<!-- -->
-
 
 
 
@@ -977,7 +992,7 @@ summary(idx<-match(seq3utr$ensembl_transcript_id,expressed_transcripts$ensembl_t
 
 ```
 ##    Min. 1st Qu.  Median    Mean 3rd Qu.    Max. 
-## 
+##       1    5966   12530   12710   19300   27290
 ```
 
 ```r
@@ -994,7 +1009,7 @@ sum(duplicated(paste0(seq3utr$`3utr`,seq3utr$ensembl_gene_id)))
 ```
 
 ```
-## [1] 0
+## [1] 7268
 ```
 
 ```r
@@ -1007,7 +1022,7 @@ summary(width(seq3utrBS))
 
 ```
 ##    Min. 1st Qu.  Median    Mean 3rd Qu.    Max. 
-## 
+##     8.0    81.0   147.0   207.9   269.0  2812.0
 ```
 
 ```r
@@ -1019,7 +1034,9 @@ table(as.logical(seq3utr$taw))
 ```
 
 ```
-## < table of extent 0 >
+## 
+## FALSE  TRUE 
+##   270 14221
 ```
 
 ```r
@@ -1039,7 +1056,9 @@ table(as.logical(seq3utr$loedige))
 ```
 
 ```
-## < table of extent 0 >
+## 
+## FALSE  TRUE 
+## 13894   597
 ```
 
 ```r
@@ -1047,18 +1066,18 @@ table(as.logical(seq3utr$loedige))
 temp<-seq3utr %>% group_by(ensembl_gene_id) %>% 
   summarize(taw_log=as.logical(sum(taw)),loedige_log=as.logical(sum(loedige))) %>% as.data.frame
 
-a<-sum(temp[temp$ensembl_gene_id %in% oma1_genes,"taw_log"])
-b<-sum(temp[!temp$ensembl_gene_id %in% oma1_genes,"taw_log"])
-c<-sum(oma1_genes %in% temp$ensembl_gene_id)
+a<-sum(temp[temp$ensembl_gene_id %in% oma1q4_genes,"taw_log"])
+b<-sum(temp[!temp$ensembl_gene_id %in% oma1q4_genes,"taw_log"])
+c<-sum(oma1q4_genes %in% temp$ensembl_gene_id)
 d<-sum(expressed_genes %in% temp$ensembl_gene_id)
 
 (x<-matrix(c(d-b-c,b,c-a,a),ncol=2))
 ```
 
 ```
-##      [,1] [,2]
-## [1,]    0    0
-## [2,]    0    0
+##       [,1] [,2]
+## [1,]   182    8
+## [2,] 10843 1294
 ```
 
 ```r
@@ -1070,29 +1089,29 @@ d<-sum(expressed_genes %in% temp$ensembl_gene_id)
 ## 	Fisher's Exact Test for Count Data
 ## 
 ## data:  x
-## p-value = 1
+## p-value = 0.002656
 ## alternative hypothesis: true odds ratio is not equal to 1
 ## 95 percent confidence interval:
-##    0 Inf
+##  1.344566 6.398495
 ## sample estimates:
 ## odds ratio 
-##          0
+##   2.714829
 ```
 
 ```r
 #oma-1 loedige
-a<-sum(temp[temp$ensembl_gene_id %in% oma1_genes,"loedige_log"])
-b<-sum(temp[!temp$ensembl_gene_id %in% oma1_genes,"loedige_log"])
-c<-sum(oma1_genes %in% temp$ensembl_gene_id)
+a<-sum(temp[temp$ensembl_gene_id %in% oma1q4_genes,"loedige_log"])
+b<-sum(temp[!temp$ensembl_gene_id %in% oma1q4_genes,"loedige_log"])
+c<-sum(oma1q4_genes %in% temp$ensembl_gene_id)
 d<-sum(expressed_genes %in% temp$ensembl_gene_id)
 
 (x<-matrix(c(d-b-c,b,c-a,a),ncol=2))
 ```
 
 ```
-##      [,1] [,2]
-## [1,]    0    0
-## [2,]    0    0
+##       [,1] [,2]
+## [1,] 10561 1242
+## [2,]   464   60
 ```
 
 ```r
@@ -1104,29 +1123,29 @@ d<-sum(expressed_genes %in% temp$ensembl_gene_id)
 ## 	Fisher's Exact Test for Count Data
 ## 
 ## data:  x
-## p-value = 1
+## p-value = 0.513
 ## alternative hypothesis: true odds ratio is not equal to 1
 ## 95 percent confidence interval:
-##    0 Inf
+##  0.8205457 1.4515313
 ## sample estimates:
 ## odds ratio 
-##          0
+##   1.099581
 ```
 
 ```r
 #lin41 TAW
-a<-sum(temp[temp$ensembl_gene_id %in% lin41_genes,"taw_log"])
-b<-sum(temp[!temp$ensembl_gene_id %in% lin41_genes,"taw_log"])
-c<-sum(lin41_genes %in% temp$ensembl_gene_id)
+a<-sum(temp[temp$ensembl_gene_id %in% lin41q4_genes,"taw_log"])
+b<-sum(temp[!temp$ensembl_gene_id %in% lin41q4_genes,"taw_log"])
+c<-sum(lin41q4_genes %in% temp$ensembl_gene_id)
 d<-sum(expressed_genes %in% temp$ensembl_gene_id)
 
 (x<-matrix(c(d-b-c,b,c-a,a),ncol=2))
 ```
 
 ```
-##      [,1] [,2]
-## [1,]    0    0
-## [2,]    0    0
+##       [,1] [,2]
+## [1,]   190    0
+## [2,] 11569  568
 ```
 
 ```r
@@ -1138,29 +1157,29 @@ d<-sum(expressed_genes %in% temp$ensembl_gene_id)
 ## 	Fisher's Exact Test for Count Data
 ## 
 ## data:  x
-## p-value = 1
+## p-value = 0.0002987
 ## alternative hypothesis: true odds ratio is not equal to 1
 ## 95 percent confidence interval:
-##    0 Inf
+##  2.495761      Inf
 ## sample estimates:
 ## odds ratio 
-##          0
+##        Inf
 ```
 
 ```r
 #lin41 loedige
-a<-sum(temp[temp$ensembl_gene_id %in% lin41_genes,"loedige_log"])
-b<-sum(temp[!temp$ensembl_gene_id %in% lin41_genes,"loedige_log"])
-c<-sum(lin41_genes %in% temp$ensembl_gene_id)
+a<-sum(temp[temp$ensembl_gene_id %in% lin41q4_genes,"loedige_log"])
+b<-sum(temp[!temp$ensembl_gene_id %in% lin41q4_genes,"loedige_log"])
+c<-sum(lin41q4_genes %in% temp$ensembl_gene_id)
 d<-sum(expressed_genes %in% temp$ensembl_gene_id)
 
 (x<-matrix(c(d-b-c,b,c-a,a),ncol=2))
 ```
 
 ```
-##      [,1] [,2]
-## [1,]    0    0
-## [2,]    0    0
+##       [,1] [,2]
+## [1,] 11272  531
+## [2,]   487   37
 ```
 
 ```r
@@ -1172,46 +1191,30 @@ d<-sum(expressed_genes %in% temp$ensembl_gene_id)
 ## 	Fisher's Exact Test for Count Data
 ## 
 ## data:  x
-## p-value = 1
+## p-value = 0.01009
 ## alternative hypothesis: true odds ratio is not equal to 1
 ## 95 percent confidence interval:
-##    0 Inf
+##  1.109355 2.284124
 ## sample estimates:
 ## odds ratio 
-##          0
+##   1.612709
 ```
 
 ```r
-print(paste0("TAW motif enrichment in 3' UTR of Oma1 Enriched Genes:  ",oma1_taw_3p_test$p.value))
+x<-round(data.frame(pvalue=c(oma1_taw_3p_test$p.value,oma1_loedige_3p_test$p.value,lin41_taw_3p_test$p.value,lin41_loedige_3p_test$p.value)),5)
+rownames(x)<-c("TAW motif enrichment in 3' UTR of Oma1 Enriched Genes",
+               "RNAcompete Lin-41 motif enrichment in 3' UTR of Oma1 Enriched Genes",
+               "TAW motif enrichment in 3' UTR of Lin-41 Enriched Genes",
+               "RNACompete Lin-41 motif enrichment in 3' UTR of Lin-41 Enriched Gene")
+knitr::kable(x)
 ```
 
-```
-## [1] "TAW motif enrichment in 3' UTR of Oma1 Enriched Genes:  1"
-```
-
-```r
-print(paste0("RNAcompete Lin-41 motif enrichment in 3' UTR of Oma1 Enriched Genes:  ",oma1_loedige_3p_test$p.value))
-```
-
-```
-## [1] "RNAcompete Lin-41 motif enrichment in 3' UTR of Oma1 Enriched Genes:  1"
-```
-
-```r
-print(paste0("TAW motif enrichment in 3' UTR of Lin-41 Enriched Genes:  ",lin41_taw_3p_test$p.value))
-```
-
-```
-## [1] "TAW motif enrichment in 3' UTR of Lin-41 Enriched Genes:  1"
-```
-
-```r
-print(paste0("RNACompete Lin-41 motif enrichment in 3' UTR of Lin-41 Enriched Genes:  ",lin41_loedige_3p_test$p.value))
-```
-
-```
-## [1] "RNACompete Lin-41 motif enrichment in 3' UTR of Lin-41 Enriched Genes:  1"
-```
+                                                                         pvalue
+---------------------------------------------------------------------  --------
+TAW motif enrichment in 3' UTR of Oma1 Enriched Genes                   0.00266
+RNAcompete Lin-41 motif enrichment in 3' UTR of Oma1 Enriched Genes     0.51298
+TAW motif enrichment in 3' UTR of Lin-41 Enriched Genes                 0.00030
+RNACompete Lin-41 motif enrichment in 3' UTR of Lin-41 Enriched Gene    0.01009
 
 ## Search for OMA-1 and LIN-41 Motifs in 5' UTRs 
 
@@ -1290,9 +1293,9 @@ table(as.logical(seq5utr$loedige))
 temp<-seq5utr %>% group_by(ensembl_gene_id) %>% 
   summarize(taw_log=as.logical(sum(taw)),loedige_log=as.logical(sum(loedige))) %>% as.data.frame
 
-a<-sum(temp[temp$ensembl_gene_id %in% oma1_genes,"taw_log"])
-b<-sum(temp[!temp$ensembl_gene_id %in% oma1_genes,"taw_log"])
-c<-sum(oma1_genes %in% temp$ensembl_gene_id)
+a<-sum(temp[temp$ensembl_gene_id %in% oma1q4_genes,"taw_log"])
+b<-sum(temp[!temp$ensembl_gene_id %in% oma1q4_genes,"taw_log"])
+c<-sum(oma1q4_genes %in% temp$ensembl_gene_id)
 d<-sum(expressed_genes %in% temp$ensembl_gene_id)
 
 (x<-matrix(c(d-b-c,b,c-a,a),ncol=2))
@@ -1300,8 +1303,8 @@ d<-sum(expressed_genes %in% temp$ensembl_gene_id)
 
 ```
 ##      [,1] [,2]
-## [1,] 2161  239
-## [2,] 5741  679
+## [1,] 2163  237
+## [2,] 5746  674
 ```
 
 ```r
@@ -1313,20 +1316,20 @@ d<-sum(expressed_genes %in% temp$ensembl_gene_id)
 ## 	Fisher's Exact Test for Count Data
 ## 
 ## data:  x
-## p-value = 0.4108
+## p-value = 0.4092
 ## alternative hypothesis: true odds ratio is not equal to 1
 ## 95 percent confidence interval:
-##  0.913618 1.254813
+##  0.9140678 1.2568988
 ## sample estimates:
 ## odds ratio 
-##   1.069393
+##   1.070534
 ```
 
 ```r
 #oma-1 loedige
-a<-sum(temp[temp$ensembl_gene_id %in% oma1_genes,"loedige_log"])
-b<-sum(temp[!temp$ensembl_gene_id %in% oma1_genes,"loedige_log"])
-c<-sum(oma1_genes %in% temp$ensembl_gene_id)
+a<-sum(temp[temp$ensembl_gene_id %in% oma1q4_genes,"loedige_log"])
+b<-sum(temp[!temp$ensembl_gene_id %in% oma1q4_genes,"loedige_log"])
+c<-sum(oma1q4_genes %in% temp$ensembl_gene_id)
 d<-sum(expressed_genes %in% temp$ensembl_gene_id)
 
 (x<-matrix(c(d-b-c,b,c-a,a),ncol=2))
@@ -1334,7 +1337,7 @@ d<-sum(expressed_genes %in% temp$ensembl_gene_id)
 
 ```
 ##      [,1] [,2]
-## [1,] 7672  889
+## [1,] 7679  882
 ## [2,]  230   29
 ```
 
@@ -1347,20 +1350,20 @@ d<-sum(expressed_genes %in% temp$ensembl_gene_id)
 ## 	Fisher's Exact Test for Count Data
 ## 
 ## data:  x
-## p-value = 0.6791
+## p-value = 0.605
 ## alternative hypothesis: true odds ratio is not equal to 1
 ## 95 percent confidence interval:
-##  0.7082234 1.6169608
+##  0.7144517 1.6313697
 ## sample estimates:
 ## odds ratio 
-##   1.088141
+##   1.097709
 ```
 
 ```r
 #lin41 TAW
-a<-sum(temp[temp$ensembl_gene_id %in% lin41_genes,"taw_log"])
-b<-sum(temp[!temp$ensembl_gene_id %in% lin41_genes,"taw_log"])
-c<-sum(lin41_genes %in% temp$ensembl_gene_id)
+a<-sum(temp[temp$ensembl_gene_id %in% lin41q4_genes,"taw_log"])
+b<-sum(temp[!temp$ensembl_gene_id %in% lin41q4_genes,"taw_log"])
+c<-sum(lin41q4_genes %in% temp$ensembl_gene_id)
 d<-sum(expressed_genes %in% temp$ensembl_gene_id)
 
 (x<-matrix(c(d-b-c,b,c-a,a),ncol=2))
@@ -1368,8 +1371,8 @@ d<-sum(expressed_genes %in% temp$ensembl_gene_id)
 
 ```
 ##      [,1] [,2]
-## [1,] 2291  109
-## [2,] 6129  291
+## [1,] 2290  110
+## [2,] 6131  289
 ```
 
 ```r
@@ -1381,20 +1384,20 @@ d<-sum(expressed_genes %in% temp$ensembl_gene_id)
 ## 	Fisher's Exact Test for Count Data
 ## 
 ## data:  x
-## p-value = 1
+## p-value = 0.863
 ## alternative hypothesis: true odds ratio is not equal to 1
 ## 95 percent confidence interval:
-##  0.793688 1.262094
+##  0.7808512 1.2402551
 ## sample estimates:
 ## odds ratio 
-##  0.9979345
+##  0.9813186
 ```
 
 ```r
 #lin41 loedige
-a<-sum(temp[temp$ensembl_gene_id %in% lin41_genes,"loedige_log"])
-b<-sum(temp[!temp$ensembl_gene_id %in% lin41_genes,"loedige_log"])
-c<-sum(lin41_genes %in% temp$ensembl_gene_id)
+a<-sum(temp[temp$ensembl_gene_id %in% lin41q4_genes,"loedige_log"])
+b<-sum(temp[!temp$ensembl_gene_id %in% lin41q4_genes,"loedige_log"])
+c<-sum(lin41q4_genes %in% temp$ensembl_gene_id)
 d<-sum(expressed_genes %in% temp$ensembl_gene_id)
 
 (x<-matrix(c(d-b-c,b,c-a,a),ncol=2))
@@ -1402,7 +1405,7 @@ d<-sum(expressed_genes %in% temp$ensembl_gene_id)
 
 ```
 ##      [,1] [,2]
-## [1,] 8176  385
+## [1,] 8177  384
 ## [2,]  244   15
 ```
 
@@ -1415,97 +1418,57 @@ d<-sum(expressed_genes %in% temp$ensembl_gene_id)
 ## 	Fisher's Exact Test for Count Data
 ## 
 ## data:  x
-## p-value = 0.2905
+## p-value = 0.2893
 ## alternative hypothesis: true odds ratio is not equal to 1
 ## 95 percent confidence interval:
-##  0.7123876 2.2238943
+##  0.7143123 2.2300251
 ## sample estimates:
 ## odds ratio 
-##   1.305468
+##   1.309028
 ```
 
 ```r
-print(paste0("TAW motif enrichment in 5' UTR of Oma1 Enriched Genes:  ",oma1_taw_5p_test$p.value))
+x<-round(data.frame(pvalue=c(oma1_taw_5p_test$p.value,oma1_loedige_5p_test$p.value,lin41_taw_5p_test$p.value,lin41_loedige_5p_test$p.value)),5)
+rownames(x)<-c("TAW motif enrichment in 5' UTR of Oma1 Enriched Genes",
+               "RNAcompete Lin-41 motif enrichment in 5' UTR of Oma1 Enriched Genes",
+               "TAW motif enrichment in 5' UTR of Lin-41 Enriched Genes",
+               "RNACompete Lin-41 motif enrichment in 5' UTR of Lin-41 Enriched Gene")
+knitr::kable(x)
 ```
 
-```
-## [1] "TAW motif enrichment in 5' UTR of Oma1 Enriched Genes:  0.410839678430791"
-```
+                                                                         pvalue
+---------------------------------------------------------------------  --------
+TAW motif enrichment in 5' UTR of Oma1 Enriched Genes                   0.40917
+RNAcompete Lin-41 motif enrichment in 5' UTR of Oma1 Enriched Genes     0.60504
+TAW motif enrichment in 5' UTR of Lin-41 Enriched Genes                 0.86302
+RNACompete Lin-41 motif enrichment in 5' UTR of Lin-41 Enriched Gene    0.28935
+
+
+## MEME de novo explore UTR's of LIN-41 exclusive set
+
 
 ```r
-print(paste0("RNAcompete Lin-41 motif enrichment in 5' UTR of Oma1 Enriched Genes:  ",oma1_loedige_5p_test$p.value))
+length(lin41q4_exclusive_3p_BS<-seq3utrBS[seq3utr[seq3utr$ensembl_gene_id %in% lin41q4_genes_exclusive,"ensembl_transcript_id"]])
+length(lin41_3p_BS<-seq3utrBS[seq3utr[seq3utr$ensembl_gene_id %in% lin41q4_genes,"ensembl_transcript_id"]])
+
+motifSet_lin41_3utr_exclusive <- runMEME(lin41q4_exclusive_3p_BS, binary="/usr/ngs/bin/meme/bin/meme",arguments=list("-nmotifs"=3,"-maxsize"=1e16))
+motifSet_lin41_3utr_full <- runMEME(lin41_3p_BS, binary="/usr/ngs/bin/meme/bin/meme",arguments=list("-nmotifs"=3,"-maxsize"=1e16,,"-w"=7))
+save(motifSet_lin41_3utr,motifSet_lin41_3utr_full,file="motifsets_lin41_3pUTR.rdata")
 ```
 
-```
-## [1] "RNAcompete Lin-41 motif enrichment in 5' UTR of Oma1 Enriched Genes:  0.679097893626047"
-```
+
+## Analyze Meme findings
 
 ```r
-print(paste0("TAW motif enrichment in Lin-41 5' UTR of Enriched Genes:  ",lin41_taw_5p_test$p.value))
-```
+load("motifsets_lin41_3pUTR.rdata")
 
-```
-## [1] "TAW motif enrichment in Lin-41 5' UTR of Enriched Genes:  1"
-```
+motif2pfm<-function(m) {
+  temp<-consensusMatrix(m)
+  #rownames(temp)<-c("A","C","G","U")
+  new("pfm",mat=t(t(temp[1:4,])*1/colSums(temp[1:4,])), name="3'UTR motif")
+  }
 
-```r
-print(paste0("RNACompete Lin-41 motif enrichment in 5' UTR of Lin-41 Enriched Genes:  ",lin41_loedige_5p_test$p.value))
-```
-
-```
-## [1] "RNACompete Lin-41 motif enrichment in 5' UTR of Lin-41 Enriched Genes:  0.290523764773253"
-```
-
-
-# MEME de novo explore UTR's of LIN-41 exclusive set
-
-```r
-#count UA[A/U]  "TAW" motif in each 5'utr
-seq5utr<-getSequence(id = lin41_genesq4_exclusive, type = "ensembl_gene_id", seqType = "5utr", mart = ensembl_87)
-seq5utr<-seq5utr[seq5utr$`5utr`!="Sequence unavailable",]
-summary(nchar(seq5utr$`5utr`))
-seq5utrBS<-DNAStringSet(seq5utr$`5utr`)
-seq5utr$taw<-vcountPattern("TAW",seq5utrBS,fixed=FALSE)
-
-#count UA[A/U]  "TAW" motif in each 5'utr
-seq3utr<-getSequence(id = lin41_genesq4_exclusive, type = "ensembl_gene_id", seqType = "3utr", mart = ensembl_87)
-seq3utr<-seq3utr[seq3utr$`3utr`!="Sequence unavailable",]
-summary(nchar(seq3utr$`3utr`))
-
-#count UA[A/U]  "TAW" motif in each 5'utr
-seq3utrBS<-DNAStringSet(seq3utr$`3utr`)
-seq3utr$taw<-vcountPattern("TAW",seq3utrBS,fixed=FALSE)
-
-rnaCompeteMotif<-RNAStringSet(c("GCAAAGC","GUAAAAC","GUAUAAC","GCAUAGC","CUUUAAG"))
-temp<-consensusMatrix(rnaCompeteMotif)[1:4,]
-plotMotifLogo(new("pfm",mat=t(t(temp[1:4,])*1/colSums(temp[1:4,])), name="RNAcompeteMotif"))
-
-temp<-consensusMatrix(DNAStringSet(rnaCompeteMotif))[1:4,]
-x<-countPWM(temp,seq3utrBS[[1]],min.score="80%", with.score=FALSE)
-
-table(x<-unlist(lapply(seq3utrBS,function(x) countPWM(temp,x,min.score="80%"))))
-table(y<-unlist(lapply(seq5utrBS,function(x) countPWM(temp,x,min.score="80%"))))
-```
-
-#meme
-
-```r
-motifSet <- runMEME(file.path(system.file("extdata",package="TFBSTools"), "crp0.s"),
-                    binary="/usr/ngs/bin/meme/bin/meme",arguments=list("-nmotifs"=3))
-x<-readDNAStringSet(file.path(system.file("extdata",package="TFBSTools"), "crp0.s"))
-
-motifSet <- runMEME(x, binary="/usr/ngs/bin/meme/bin/meme",arguments=list("-nmotifs"=3))
-
-names(seq3utrBS)<-paste0("seq3utr_",1:length(seq3utrBS))
-summary(width(seq3utrBS))
-seq3utrBS<-seq3utrBS[width(seq3utrBS)>= 8]
-writeXStringSet(seq3utrBS,file="test3p.fasta")
-motifSet_3utr <- runMEME(seq3utrBS, binary="/usr/ngs/bin/meme/bin/meme",arguments=list("-nmotifs"=3,"-maxsize"=10000000000000000,"-w"=5))
-motifSet_3utr <- runMEME(seq3utrBS, binary="/usr/ngs/bin/meme/bin/meme",arguments=list("-nmotifs"=3,"-maxsize"=10000000000000000))
-
-(temp<-consensusMatrix(motifSet_3utr)[[2]])
-rownames(temp)<-c("A","C","G","U")
-plotMotifLogo(new("pfm",mat=t(t(temp[1:4,])*1/colSums(temp[1:4,])), name="3'UTR motif"))
+plotMotifLogo(motif2pfm(motifSet_lin41_3utr_exclusive[[1]]))
 
 seq5utrBS<-seq5utrBS[width(seq5utrBS)>= 8]
 names(seq5utrBS)<-paste0("seq5utr_",1:length(seq5utrBS))
@@ -1650,7 +1613,7 @@ kimble<-DESeq(kimble)
 ```
 
 ```r
-plotMA(kimble)
+plotMA(kimble,ylim=c(-14,14))
 ```
 
 ![](rnp_enriched_transcripts_files/figure-html/analyzeKimbleData-2.png)<!-- -->
@@ -1900,19 +1863,28 @@ g4<-res_dds87q4 %>%
   scale_colour_gradient2(low = "red2", mid = "white", high = "darkblue") +
   theme_bw()
 
-#svglite("testplot.svg",width=10,height=8)
-grid.arrange(g4,g3,ncol=2)
+g3
 ```
 
 ```
-## Warning: Removed 22484 rows containing missing values (geom_point).
-
 ## Warning: Removed 22484 rows containing missing values (geom_point).
 ```
 
 ![](rnp_enriched_transcripts_files/figure-html/oocyte_abundance-5.png)<!-- -->
 
 ```r
+g4
+```
+
+```
+## Warning: Removed 22484 rows containing missing values (geom_point).
+```
+
+![](rnp_enriched_transcripts_files/figure-html/oocyte_abundance-6.png)<!-- -->
+
+```r
+#svglite("testplot.svg",width=10,height=8)
+#grid.arrange(g4,g3,ncol=2)
 #dev.off()
 ```
 
@@ -1960,16 +1932,28 @@ g6<-res_dds87q4  %>%
   scale_colour_gradient2(low = "red2", mid = "white", high = "darkblue") +
   theme_bw()
 
-grid.arrange(g5,g6,ncol=2)
+g5
 ```
 
 ```
-## Warning: Removed 29068 rows containing missing values (geom_point).
-
 ## Warning: Removed 29068 rows containing missing values (geom_point).
 ```
 
 ![](rnp_enriched_transcripts_files/figure-html/oocyte_volcano-1.png)<!-- -->
+
+```r
+g6
+```
+
+```
+## Warning: Removed 29068 rows containing missing values (geom_point).
+```
+
+![](rnp_enriched_transcripts_files/figure-html/oocyte_volcano-2.png)<!-- -->
+
+```r
+#grid.arrange(g5,g6,ncol=2)
+```
 
 
 
