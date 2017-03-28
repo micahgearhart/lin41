@@ -1,10 +1,10 @@
 ---
 title: "Lin41 Analysis"
 author: "Micah Gearhart"
-date: "1/6/2017"
+date: "2/8/2017"
 output:
-  html_document:
-    keep_md: true
+  md_document:
+    variant: markdown_github
 ---
 
 ```{r setup, include=FALSE}
@@ -21,13 +21,16 @@ library("Rsamtools")
 library("GenomicAlignments")
 library("BiocParallel")
 library("DESeq2")
+library("limma")
 library("genefilter")
 library("pheatmap")
+library("dendsort")
 library("SRAdb")
 library("goseq")
 
 
 library("ggplot2")
+library("svglite")
 library("dplyr")
 library("tidyr")
 library("magrittr")
@@ -35,6 +38,13 @@ library("RColorBrewer")
 library("gridExtra")
 library("motifStack")
 library("VennDiagram")
+
+library("Gviz")
+library("BSgenome.Celegans.UCSC.ce11")
+
+seqlevelsStyle(BSgenome.Celegans.UCSC.ce11)<-"Ensembl"
+seqlevelsStyle(BSgenome.Celegans.UCSC.ce11)
+options(ucscChromosomeNames=FALSE)
 
 (ts<-format(Sys.time(), "%a_%b_%d_%Y_%H%M"))
 cbPalette <- c("#999999", "#E69F00", "#56B4E9", "#009E73", "#F0E442", "#0072B2", "#D55E00", "#CC79A7")
@@ -58,6 +68,7 @@ ens87<-exonsBy(txdb,by="gene")
 anno87<-getBM(filters="ensembl_gene_id",values=names(ens87), attributes=c("ensembl_gene_id","wikigene_name","transcript_biotype","external_gene_name"), mart=ensembl_87)
 
 save(ens87,anno87,file="ens87.rdata")
+AnnotationDbi::saveDb(txdb,file="~/test.db")
 ```
 
 
@@ -106,28 +117,35 @@ load("genehits87_Mon_Feb_06_2017_1446.rdata")
 
 counts87<-as.data.frame(assays(genehits87)$counts)
 counts87q4<-as.data.frame(assays(genehits87_mapq_filter)$counts)
+
+
                           
 summary(idx<-match(rownames(counts87),anno87$ensembl_gene_id))
 counts87$biotype<-anno87[idx,"transcript_biotype"]
 counts87q4$biotype<-anno87[idx,"transcript_biotype"]
 
+mean(apply(counts87[,1:9],2,sum))
+mean(apply(counts87q4[,1:9],2,sum))
+
 g1<-tidyr::gather(counts87,sample,counts,-biotype) %>%
   dplyr::group_by(sample,biotype) %>%
   dplyr::summarize(countSum=sum(counts)) %>%
   ggplot(aes(x=sample,y=countSum,fill=biotype)) + ggtitle("Counts with Ensembl87") +
-  scale_fill_manual(values=rev(cbPalette2),guide = guide_legend(reverse=TRUE)) +
+  scale_fill_manual(values=rev(cbPalette2),guide = guide_legend(reverse=TRUE)) + ylim(c(0,5e7))+
   geom_bar(stat="identity") + theme_classic() + theme(axis.text.x = element_text(angle = 90,  hjust = 0)) 
 
 g2<-tidyr::gather(counts87q4,sample,counts,-biotype) %>%
   dplyr::group_by(sample,biotype) %>%
   dplyr::summarize(countSum=sum(counts)) %>%
   ggplot(aes(x=sample,y=countSum,fill=biotype)) + ggtitle("Counts with Ensembl87 with Mapping Quality Filter") +
-  scale_fill_manual(values=rev(cbPalette2),guide = guide_legend(reverse=TRUE)) +
+  scale_fill_manual(values=rev(cbPalette2),guide = guide_legend(reverse=TRUE)) + ylim(c(0,5e7)) +
   geom_bar(stat="identity") + theme_classic() + theme(axis.text.x = element_text(angle = 90,  hjust = 0)) 
 
 g1
 g2
 #grid.arrange(g1,g2,ncol=1)
+ggsave(file=paste0("read_distributions_",ts,".svg"),device = svglite::svglite,plot=g1,width=8.5,height=6)
+ggsave(file=paste0("read_distributions_q4_",ts,".svg"),device = svglite::svglite,plot=g2,width=8.5,height=6)
 ```
 
 
@@ -140,9 +158,12 @@ dim(dds87q4<-DESeqDataSet(genehits87_mapq_filter[anno87[idx,]$transcript_biotype
 file_names<-colnames(dds87)
 colnames(dds87)<-sapply(strsplit(colnames(dds87),"_"),function(x) x[1]) %>%
   gsub("2566","OMA-1_",.) %>% gsub("3923","LIN-41_",.) %>% gsub("IP4","OMA-1_042310",.)
+dds87$filename<-file_names
 
+file_names<-colnames(dds87q4)
 colnames(dds87q4)<-sapply(strsplit(colnames(dds87q4),"_"),function(x) x[1]) %>%
   gsub("2566","OMA-1_",.) %>% gsub("3923","LIN-41_",.) %>% gsub("IP4","OMA-1_042310",.)
+dds87q4$filename<-file_names
 
 dds87$tag<-as.factor(c("OMA-1","OMA-1","LysRZ","Lys","LIN-41","LIN-41","LysRZ","Lys","OMA-1_042310"))
 dds87q4$tag<-as.factor(c("OMA-1","OMA-1","LysRZ","Lys","LIN-41","LIN-41","LysRZ","Lys","OMA-1_042310"))
@@ -150,19 +171,39 @@ dds87q4$tag<-as.factor(c("OMA-1","OMA-1","LysRZ","Lys","LIN-41","LIN-41","LysRZ"
 design(dds87)<-(~tag)
 design(dds87q4)<-(~tag)
 
-plotPCA( DESeqTransform( dds87 ),intgroup="tag")+ ggtitle("PCA without MapQ Filter") + theme_bw()
-plotPCA( DESeqTransform( dds87q4 ),intgroup="tag")+ ggtitle("PCA with MapQ Filter") + theme_bw()
+(pca1<-plotPCA( DESeqTransform( dds87 ),intgroup="tag")+ ggtitle("PCA without MapQ Filter") +
+    scale_color_manual(values=cbPalette[c(7,5,2,6,3)]) +
+    theme_bw() + theme(panel.grid.major=element_blank(), panel.grid.minor=element_blank()) )
 
+(pca2<-plotPCA( DESeqTransform( dds87q4 ),intgroup="tag")+ ggtitle("PCA with MapQ Filter") + 
+    scale_color_manual(values=cbPalette[c(7,5,2,6,3)]) +
+    theme_bw() + theme(panel.grid.major=element_blank(), panel.grid.minor=element_blank()) )
+
+ggsave(file=paste0("pca_",ts,".svg"),device = svglite::svglite,plot=pca2,width=8.5,height=6)
+
+```
+
+## Create bigWig files using DESeq2 normalization Size Factors
+
+```{r bigWigs,eval=F}
+bam2bw<-function(x) {
+for (i in seq_along(1:ncol(x))) {
+print(colData(x)[i,"filename"])
+temp.cov<-coverage(readGAlignments(colData(x)[i,"filename"],param=param),weight=1/colData(x)[i,"sizeFactor"])
+export(temp.cov,paste0(colnames(x)[i],"_q4_scaled.bigWig"))
+    }
+}
+bam2bw(dds87q4)
 ```
 
 ## Run Differential Expression on both dds objects
 ```{r DESeq2,eval=T}
 dds87<-DESeq(dds87)
-plotMA(dds87,ylim=c(-8,8))
+#plotMA(dds87,ylim=c(-8,8))
 resultsNames(dds87)
 
-res_Oma1_dds87<-results(dds87,lfcThreshold=2,contrast=c("tag","OMA-1","LysRZ"))
-res_Lin41_dds87<-results(dds87,lfcThreshold=2,contrast=c("tag","LIN-41","LysRZ"))
+res_Oma1_dds87<-results(dds87,altHypothesis = "greater",lfcThreshold=0,contrast=c("tag","OMA-1","LysRZ"))
+res_Lin41_dds87<-results(dds87,altHypothesis = "greater",lfcThreshold=0,contrast=c("tag","LIN-41","LysRZ"))
 
 #Estimate LogFC for single replicate Oma-1 sample
 dds87_counts<-counts(dds87,normalized=TRUE)
@@ -172,11 +213,11 @@ res_dds87<-cbind(res_oma1_042310_dds87,res_Oma1_dds87$log2FoldChange,res_Lin41_d
 colnames(res_dds87)<-c("Oma-1 042310","Oma-1 IP","Lin-41 IP")
 
 dds87q4<-DESeq(dds87q4)
-plotMA(dds87q4,ylim=c(-8,8))
+#plotMA(dds87q4,ylim=c(-8,8))
 resultsNames(dds87q4)
 
-res_Oma1_dds87q4<-results(dds87q4,lfcThreshold=2,contrast=c("tag","OMA-1","LysRZ"))
-res_Lin41_dds87q4<-results(dds87q4,lfcThreshold=2,contrast=c("tag","LIN-41","LysRZ"))
+res_Oma1_dds87q4<-results(dds87q4,altHypothesis = "greater",lfcThreshold=0,contrast=c("tag","OMA-1","LysRZ"))
+res_Lin41_dds87q4<-results(dds87q4,altHypothesis = "greater",lfcThreshold=0,contrast=c("tag","LIN-41","LysRZ"))
 
 #Estimate LogFC for single replicate Oma-1 sample
 dds87q4_counts<-counts(dds87q4,normalized=TRUE)
@@ -206,8 +247,13 @@ text(-6,5,paste0("Spearman correlation:  ",round(corr_oma_v_oma,3)),col="blue")
 
 ## MAKE A Master Table with MAPQ FLAG, Biotype, and mean FPKM per sample
 ```{r masterTable,eval=T}
+#add basemean and p-values
+idx<-match(rownames(res_dds87q4),rownames(res_Oma1_dds87q4))
+res_dds87q4$baseMean<-res_Oma1_dds87q4$baseMean
+res_dds87q4$Oma1_padj<-res_Oma1_dds87q4$padj
+res_dds87q4$Lin41_padj<-res_Lin41_dds87q4$padj
+  
 #Add annotation information
-
 idx<-match(rownames(res_dds87q4),anno87$ensembl_gene_id)
 res_dds87q4$biotype<-anno87[idx,"transcript_biotype"]
 res_dds87q4$name<-anno87[idx,"wikigene_name"]
@@ -244,17 +290,7 @@ res_dds87q4$lin41_fpkm<-round(dds87q4_fpkm[idx,"lin41"],2)
 
 ```
 
-## Heatmaps of High Log2FC or High Variance Genes
-```{r heatmap,eval=T,fig.height=10,fig.width=6}
-#log2 fold change in eiter sample
-dim(temp<-res_dds87q4[!(is.na(res_dds87q4[,2]) | is.na(res_dds87q4[,3])),])
-dim(temp<-temp[temp[,2]>2 | temp[,3] > 2,])
-pheatmap(temp[,1:3],show_rownames=F)
 
-#just samples with highest variance between Oma-1 and Lin-41
-dim(temp<-temp[rowVars(temp[,2:3])>8.5,]) #arbitrary cutoff to get a readable gene list
-pheatmap(temp[,1:3],labels_row=temp$external_name)
-```
 
 #Venn Diagrams - with p-values
 ```{r vennDiagrams,eval=T}
@@ -272,16 +308,50 @@ x21<-length(oma1q4_genes_exclusive<-oma1q4_genes[!oma1q4_genes %in% overlapq4])
 y21<-length(lin41q4_genes_exclusive<-lin41q4_genes[!lin41q4_genes %in% overlapq4])
 grid.newpage()
 vennplot <- draw.pairwise.venn(x2,y2,z2, c("Oma-1", "Lin-41"))
+
+svglite::svglite(file=paste0("venn_",ts,".svg"),width=8,height=8)
+vennplot <- draw.pairwise.venn(x2,y2,z2, c("Oma-1", "Lin-41"))
+dev.off()
 ```
 
 ## Use scatterplot to visualize relationships in Venn Diagram
 ```{r scatterplot,eval=T}
-plot(res_dds87q4[,2],res_dds87q4[,3],cex=0.5,pch=16,ylim=c(-7,7),xlim=c(-7,7),main="Oma-1 vs Lin-41 Enrichment", 
-     ylab="LIN-41 Log2Fold Change",xlab="OMA-1 Log2Fold Change",
-     col=ifelse(rownames(res_dds87q4) %in% overlapq4,"blue",
-                ifelse(rownames(res_dds87q4) %in% oma1q4_genes_exclusive,"green",
-                ifelse(rownames(res_dds87q4) %in% lin41q4_genes_exclusive,"red","black"))))
-abline(a=0,b=1,col="red")
+#plot(res_dds87q4[,2],res_dds87q4[,3],cex=0.5,pch=16,ylim=c(-7,7),xlim=c(-7,7),main="Oma-1 vs Lin-41 Enrichment", 
+#     ylab="LIN-41 Log2Fold Change",xlab="OMA-1 Log2Fold Change",
+#     col=ifelse(rownames(res_dds87q4) %in% overlapq4,cbPalette[8],
+#                ifelse(rownames(res_dds87q4) %in% oma1q4_genes_exclusive,cbPalette[6],
+#                ifelse(rownames(res_dds87q4) %in% lin41q4_genes_exclusive,cbPalette[7],cbPalette[1]))))
+#abline(a=0,b=1,col="black")
+#abline(h=2,col=cbPalette[1])
+#abline(v=2,col=cbPalette[1])
+
+s<-res_dds87q4[,c("Oma-1 IP","Lin-41 IP","external_name")] %>% 
+  tibble::rownames_to_column() %>% 
+  dplyr::filter(!is.na(`Oma-1 IP`) | !is.na(`Lin-41 IP`)) %>% 
+  mutate(group=ifelse(rowname %in% overlapq4,"overlap",
+                ifelse(rowname %in% oma1q4_genes_exclusive,"oma-1",
+                ifelse(rowname %in% lin41q4_genes_exclusive,"lin-41","none"))))  %>% 
+  ggplot(aes(x=`Oma-1 IP`,y=`Lin-41 IP`,color=group)) +geom_point() +
+  scale_color_manual(values=cbPalette[c(7,1,6,8)]) +
+  xlim(c(-9,9)) + ylim(c(-9,9)) + 
+  geom_abline() + geom_hline(yintercept = 2,color="gray") + geom_vline(xintercept = 2,color="gray") +
+  ylab("LIN-41 Log2Fold Change") + xlab ("OMA-1 Log2Fold Change") +
+  ggtitle("Oma-1 vs Lin-41 Enrichment")+
+  theme_bw() + theme(panel.grid.major=element_blank(), panel.grid.minor=element_blank())
+
+labels<-res_dds87q4[res_dds87q4$external_name %in% c("spn-4","cdc-25.3","lin-29","zif-1","rnp-1"),
+                    c("Oma-1 IP","Lin-41 IP","external_name")]
+
+s<-s+annotate("text",x=labels$`Oma-1 IP`, y=labels$`Lin-41 IP`,label=labels$external_name)
+
+s
+
+pdf(paste0("scatter_",ts,".pdf"),width=8,height=8)
+s
+dev.off()
+
+ggsave(file=paste0("scatter_",ts,".svg"),device = svglite::svglite,plot=s,width=8,height=8)
+
 ```
 
 ## Visualise as smoothScatter
@@ -310,6 +380,65 @@ abline(h=2,col="red")
 abline(v=2,col="red")
 ```
 
+
+## Heatmaps of High Log2FC or High Variance Genes
+```{r heatmap,eval=T,fig.height=10,fig.width=6}
+
+#pull out a copy of the data without NA values
+dim(temp<-res_dds87q4[!(is.na(res_dds87q4[,2]) | is.na(res_dds87q4[,3])),])
+
+#Add classification for Annotation row
+table(temp$class<-ifelse(rownames(temp) %in% overlapq4,"Overlap",
+                ifelse(rownames(temp) %in% oma1q4_genes_exclusive,"OMA-1 IP Enriched",
+                ifelse(rownames(temp) %in% lin41q4_genes_exclusive,"LIN-41 IP Enriched","Not Enriched"))))
+
+#compute variance between LIN-41 and OMA-1 IP
+temp$rowvar<-round(rowVars(temp[,2:3]),3)
+
+#subset out components of Venn Diagram
+dim(temp<-temp[temp$class != "Not Enriched",])
+
+#subset to genes that are abundant in one or both IPs
+dim(temp<-temp[temp$oma1_fpkm > 50 | temp$lin41_fpkm > 50,])
+
+#check table
+goi<-c("lin-29","spn-4","lin-66","mab-10","orc-1","dmd-3","meg-1","dlk-1","mex-3")
+knitr::kable(temp[temp$external_name %in% goi,c(2,3,9,12:16)])
+
+#Select top 40 genes
+temp<- temp %>% tibble::rownames_to_column(var="ensembl") %>% 
+  top_n(40,rowvar)
+
+#sort based on lin41 abundance
+temp<-temp[with(temp,order(-`lin41_fpkm`)),]
+
+ann_colors = list(
+class = c('OMA-1 IP Enriched' = cbPalette[6],
+          'LIN-41 IP Enriched' = cbPalette[7],
+          'Overlap' = cbPalette[8])
+)
+
+ann_row = temp[,"class",drop=F]
+rownames(ann_row)<-temp$ensembl
+
+pheatmap(log2(dds87q4_fpkm[temp$ensembl,c(3,7,9,1,2,5,6)]),cluster_cols=F,cluster_rows=F,
+         labels_row=temp$external_name,clustering_callback=callback, 
+         main="",
+         annotation_row =ann_row,legend=TRUE,
+         legend_breaks = c(0, 5, 10, 15, log2(max(temp[,"lin41_fpkm"]))),
+         legend_labels = c("0", "5", "10", "15", "Log2 FPKM\n"),
+         annotation_colors=ann_colors)
+
+pheatmap(log2(dds87q4_fpkm[temp$ensembl,c(3,7,9,1,2,5,6)]),cluster_cols=F,cluster_rows=F,
+         labels_row=temp$external_name,clustering_callback=callback, 
+         main="",
+         filename=paste0("heatmap_",ts,".pdf"),
+         annotation_row =ann_row,legend=TRUE,
+         legend_breaks = c(0, 5, 10, 15, log2(max(temp[,"lin41_fpkm"]))),
+         legend_labels = c("0", "5", "10", "15", "Log2 FPKM\n"),
+         annotation_colors=ann_colors)
+
+```
 
 #Now run GO Analysis on each section of Venn Diagram
 ## GO Analysis
@@ -362,7 +491,7 @@ save(wb_go,go_terms,file="wb_257_goterms.rdata")
 ## GO Analysis of each VENN category
 ```{r GO,eval=T}
 load("wb_257_goterms.rdata")
-length(expressed_genes<-rownames(res_Lin41_dds87q4[res_Lin41_dds87q4$baseMean > 1,]))
+length(expressed_genes<-rownames(res_dds87q4[res_dds87q4$baseMean > 1,]))
 
 #alternatively insist on enough data to define p-value
 #length(expressed_genes<-rownames(res_Lin41_dds87q4[res_Lin41_dds87q4$baseMean > 1 & !is.na(res_Lin41_dds87q4$log2FoldChange) & !is.na(res_Lin41_dds87q4$padj) & !is.na(res_Oma1_dds87q4$log2FoldChange) & !is.na(res_Oma1_dds87q4$padj),]))
@@ -371,12 +500,15 @@ dim(wb_go<-wb_go[wb_go$ensembl %in% expressed_genes,])
 wb_go.list<-split(wb_go$`GO ID`,wb_go$ensembl)
 
 listGO<-function(goid,degs) {
-  print(go_terms[goid])
+  #print(go_terms[goid])
   tg<-wb_go[grep(goid,wb_go$`GO ID`),"ensembl",drop=F]
+  tg$go<-goid
   idx<-match(tg$ensembl,anno87$ensembl_gene_id)
   tg$symbol<-anno87[idx,"wikigene_name"]
   tg$deg<-degs[tg$ensembl]
-  as.data.frame(tg)
+  tg$`OMA-1 IP`<-res_dds87q4[tg$ensembl,"Oma-1 IP"]
+  tg$`LIN-41 IP`<-res_dds87q4[tg$ensembl,"Lin-41 IP"]
+  as.data.frame(tg[tg$deg==1,])
 }
 
 #degs_temp<-rep(NA,length(expressed_genes))
@@ -409,15 +541,53 @@ names(degs_overlap)<-expressed_genes
 overlap_GO<-goseq(nullp(degs_overlap,bias.data=bd),gene2cat=wb_go.list)
 overlap_GO[1:10,c("category","term","numDEInCat","numInCat","over_represented_pvalue")]
 
-#horizontal bar plot
-head(lin41_GO,10) %>%
-  dplyr::mutate(term=factor(term,levels=rev(term))) %>%
-  ggplot(aes(x=term,y=-log10(over_represented_pvalue))) +
-  geom_bar(stat="identity",fill="red") +
+#horizontal bar plots
+head(overlap_GO,10) %>% select(term) %>% knitr::kable(row.names = FALSE)
+
+g7<-head(overlap_GO,10) %>%
+  dplyr::mutate(cat=factor(category,levels=rev(category))) %>%
+  ggplot(aes(x=cat,y=-log10(over_represented_pvalue))) +
+  geom_bar(stat="identity",fill=cbPalette[8]) + ylim(c(0,5.5)) +
+  coord_flip() + xlab("") + ggtitle("Enriched GO terms overlapped Set") +
+  theme_bw() + theme(panel.grid.major=element_blank(), panel.grid.minor=element_blank(),aspect.ratio=4/3)
+
+g7
+pdf(paste0("GO_Overlap_",ts,".pdf"),width=3,height=3); g7; dev.off()
+ggsave(file=paste0("GO_Overlap_",ts,".svg"),device = svglite::svglite,plot=g7,width=3,height=3)
+
+head(oma1_GO,10) %>% select(term) %>% knitr::kable(row.names = FALSE)
+g8<-head(oma1_GO,10) %>%
+  dplyr::mutate(cat=factor(category,levels=rev(category))) %>%
+  ggplot(aes(x=cat,y=-log10(over_represented_pvalue))) +
+  geom_bar(stat="identity",fill=cbPalette[6]) + ylim(c(0,5.5)) +
+  coord_flip() + xlab("") + ggtitle("Enriched GO terms OMA-1 Exclusive Set") +
+  theme_bw() + theme(panel.grid.major=element_blank(), panel.grid.minor=element_blank(),aspect.ratio=4/3)
+
+g8
+pdf(paste0("GO_OMA1_",ts,".pdf"),width=3,height=3); g8; dev.off()
+ggsave(file=paste0("GO_OMA1_",ts,".svg"),device = svglite::svglite,plot=g8,width=3,height=3)
+
+head(lin41_GO,10) %>% select(term) %>% knitr::kable(row.names = FALSE)
+g9<-head(lin41_GO,10) %>%
+  dplyr::mutate(cat=factor(category,levels=rev(category))) %>%
+  ggplot(aes(x=cat,y=-log10(over_represented_pvalue))) +
+  geom_bar(stat="identity",fill=cbPalette[7]) + ylim(c(0,5.5)) +
   coord_flip() + xlab("") + ggtitle("Enriched GO terms LIN-41 Exclusive Set") +
-  theme_bw()
+  theme_bw() + theme(panel.grid.major=element_blank(), panel.grid.minor=element_blank(),aspect.ratio=4/3)
+
+g9
+pdf(paste0("GO_LIN41_",ts,".pdf"),width=3,height=3); g9; dev.off()
+ggsave(file=paste0("GO_LIN41_",ts,".svg"),device = svglite::svglite,plot=g9,width=3,height=3)
 
 listGO("GO:0007538",degs_overlap)
+
+#print cell cycle genes in lin41 set that are differentially expressed
+x<-listGO("GO:0007049",degs_lin41)
+x[x$deg==1,]
+
+#Use this to print out names of genes in each category
+#x<-lapply(overlap_GO[1:10,"category"],listGO,degs_overlap)
+#names(x)<-go_terms[overlap_GO[1:10,"category"]]
 
 ```
 
@@ -434,7 +604,7 @@ seq5utr<-getSequence(id = expressed_transcripts$ensembl_transcript_id, type = "e
 save(seq3utr,seq5utr,expressed_transcripts,file="utr_sequences.rdata")
 ```
 
-# Search for OMA-1 and LIN-41 Motifs in 3' UTRs
+# Figure 5B -- Search for UA[U/A] Motif among enriched transcripts
 ```{r threeUTR,eval=T}
 load("utr_sequences.rdata")
 
@@ -458,17 +628,111 @@ seq3utr<-seq3utr[,-1]  #drop sequence from dataframe
 seq3utr$taw<-vcountPattern("TAW",seq3utrBS,fixed=FALSE)
 table(as.logical(seq3utr$taw))
 
-#Count RNAcompete motif in each transcript
+
+#clean up 5'UTR sequences
+seq5utr<-seq5utr[seq5utr$`5utr`!="Sequence unavailable",]
+seq5utr<-seq5utr[nchar(seq5utr$`5utr`) >=8,]  # get rid of really short 3'UTRs
+
+# add geneid to dataframe
+summary(idx<-match(seq5utr$ensembl_transcript_id,expressed_transcripts$ensembl_transcript_id))
+seq5utr$ensembl_gene_id<-expressed_transcripts[idx,"ensembl_gene_id"]
+sum(duplicated(paste0(seq5utr$`5utr`,seq5utr$ensembl_transcript_id)))
+sum(duplicated(paste0(seq5utr$`5utr`,seq5utr$ensembl_gene_id)))
+seq5utr<-seq5utr[!duplicated(paste0(seq5utr$`5utr`,seq5utr$ensembl_gene_id)),]
+
+seq5utrBS<-DNAStringSet(seq5utr$`5utr`)
+names(seq5utrBS)<-seq5utr$ensembl_transcript_id
+summary(width(seq5utrBS))
+seq5utr<-seq5utr[,-1]  #drop sequence from dataframe
+
+#Count TAW motif and RNACompete Motif in each transcript
+seq5utr$taw<-vcountPattern("TAW",seq5utrBS,fixed=FALSE)
+table(as.logical(seq5utr$taw))
+
+```
+
+
+```{r}
+
+seq3utr$taw_ratio <-seq3utr$taw/width(seq3utrBS)
+
+table(seq3utr$class<-ifelse(seq3utr$ensembl_gene_id %in% overlapq4,"Overlap",
+                ifelse(seq3utr$ensembl_gene_id %in% oma1q4_genes_exclusive,"OMA-1 IP Enriched",
+                ifelse(seq3utr$ensembl_gene_id %in% lin41q4_genes_exclusive,"LIN-41 IP Enriched","Not Enriched"))))
+
+w<-ecdf(seq3utr[seq3utr$class=="Not Enriched","taw_ratio"])
+x<-ecdf(seq3utr[seq3utr$class=="OMA-1 IP Enriched","taw_ratio"])
+y<-ecdf(seq3utr[seq3utr$class=="LIN-41 IP Enriched","taw_ratio"])
+z<-ecdf(seq3utr[seq3utr$class=="Overlap","taw_ratio"])
+plot(w,main="ECDF of UA[U/A] frequency in 3'UTRs")
+plot(x,add=TRUE,col=cbPalette[6])
+plot(y,add=TRUE,col=cbPalette[7])
+plot(z,add=TRUE,col=cbPalette[8])
+ks_3p_oma<-round(ks.test(seq3utr[seq3utr$class=="OMA-1 IP Enriched","taw_ratio"],seq3utr[seq3utr$class=="LIN-41 IP Enriched","taw_ratio"])$p.value,5)
+ks_3p_over<-round(ks.test(seq3utr[seq3utr$class=="Overlap","taw_ratio"],seq3utr[seq3utr$class=="LIN-41 IP Enriched","taw_ratio"])$p.value,5)
+
+```
+
+```{r}
+seq5utr$taw_ratio <-seq5utr$taw/width(seq5utrBS)
+
+table(seq5utr$class<-ifelse(seq5utr$ensembl_gene_id %in% overlapq4,"Overlap",
+                ifelse(seq5utr$ensembl_gene_id %in% oma1q4_genes_exclusive,"OMA-1 IP Enriched",
+                ifelse(seq5utr$ensembl_gene_id %in% lin41q4_genes_exclusive,"LIN-41 IP Enriched","Not Enriched"))))
+
+w<-ecdf(seq5utr[seq5utr$class=="Not Enriched","taw_ratio"])
+x<-ecdf(seq5utr[seq5utr$class=="OMA-1 IP Enriched","taw_ratio"])
+y<-ecdf(seq5utr[seq5utr$class=="LIN-41 IP Enriched","taw_ratio"])
+z<-ecdf(seq5utr[seq5utr$class=="Overlap","taw_ratio"])
+plot(w,main="ECDF of UA[U/A] frequency in 5'UTRs")
+plot(x,add=TRUE,col=cbPalette[6])
+plot(y,add=TRUE,col=cbPalette[7])
+plot(z,add=TRUE,col=cbPalette[8])
+ks_5p_oma<-round(ks.test(seq5utr[seq5utr$class=="OMA-1 IP Enriched","taw_ratio"],seq5utr[seq5utr$class=="LIN-41 IP Enriched","taw_ratio"])$p.value,3)
+ks_5p_over<-round(ks.test(seq5utr[seq5utr$class=="Overlap","taw_ratio"],seq5utr[seq5utr$class=="LIN-41 IP Enriched","taw_ratio"])$p.value,3)
+
+```
+
+## Figure 5b Violin Plots
+```{r}
+g9<-bind_rows(seq5utr=seq5utr, seq3utr=seq3utr, .id = "utr") %>% 
+  dplyr::filter(class != "Not Enriched") %>% 
+  mutate(taw_ratio=1000*taw_ratio) %>% 
+  mutate(utr=factor(utr,levels=c("seq5utr","seq3utr"))) %>% 
+  mutate(class=factor(class,levels=c("OMA-1 IP Enriched","Overlap","LIN-41 IP Enriched"))) %>%
+  ggplot(aes(x=class,y=taw_ratio,fill=class))+geom_violin()+scale_fill_manual(values=cbPalette[c(6,8,7)]) +
+  stat_summary(fun.y = median, fun.ymin = median, fun.ymax = median, geom = "crossbar", width = 0.5) +
+  ylab("Number of UA[U/A] motifs per Kb") + xlab("") +
+  ylim(c(0,350)) +
+  facet_grid(.~ utr) +
+  #geom_path(x=c(3,3,2,2),y=c(180,190,190,180))+
+  annotate("segment", x=c(2,2,3),xend=c(2,3,3), y= c(295,300,300), yend=c(300,300,295)) +
+  annotate("segment", x=c(1,1,3),xend=c(1,3,3), y= c(295,300,300)+15, yend=c(300,300,295)+15) +
+  annotate("text",x=2.5,y=307,label=c(paste0("p = ",ks_5p_over),paste0("p = ",ks_3p_over)))+
+  annotate("text",x=2,y=322,label=c(paste0("p = ",ks_5p_oma),paste0("p = ",ks_3p_oma)))+
+  theme_bw() + theme(panel.grid.major=element_blank(), panel.grid.minor=element_blank(),legend.position="none") 
+
+g9
+ggsave(file=paste0("Figure_5B_violin_",ts,".svg"),device = svglite::svglite,plot=g9,width=5,height=6)
+```
+
+
+
+
+## Count RNAcompete motif in each transcript
+```{r}
 rnaCompeteMotif<-RNAStringSet(c("GCAAAGC","GUAAAAC","GUAUAAC","GCAUAGC","CUUUAAG"))
 temp<-consensusMatrix(rnaCompeteMotif)[1:4,]
 plotMotifLogo(new("pfm",mat=t(t(temp[1:4,])*1/colSums(temp[1:4,])), name="RNAcompeteMotif"))
 
 lin41_consensusMatrix<-consensusMatrix(DNAStringSet(rnaCompeteMotif))[1:4,]
 
-seq3utr$loedige<-unlist(lapply(seq3utrBS,function(x) countPWM(lin41_consensusMatrix,x,min.score="90%")))
+seq3utr$loedige<-unlist(lapply(seq3utrBS,function(x) countPWM(lin41_consensusMatrix,x,min.score="85%")))
 table(as.logical(seq3utr$loedige))
 
-#oma-1 TAW
+# Grouping by gene lets each gene only be counted once in the statistical test.  
+# If any transcript for a given gene is > 0 then the logical value is set to TRUE for that genes.
+
 temp<-seq3utr %>% group_by(ensembl_gene_id) %>% 
   summarize(taw_log=as.logical(sum(taw)),loedige_log=as.logical(sum(loedige))) %>% as.data.frame
 
@@ -515,27 +779,42 @@ rownames(x)<-c("TAW motif enrichment in 3' UTR of Oma1 Enriched Genes",
 knitr::kable(x)
 ```
 
+## which genes have hits in 3'UTR
+```{r match_3p,eval=F}
+table(seq3utr$loedige)
+
+idx<-match(seq3utr$ensembl_gene_id,rownames(res_dds87q4))
+seq3utr$external_gene_name<-res_dds87q4[idx,]$external_name
+seq3utr$`Lin-41 IP` <- res_dds87q4[idx,]$`Lin-41 IP`
+seq3utr$`Oma-1 IP` <- res_dds87q4[idx,]$`Oma-1 IP`
+temp2<-seq3utr[seq3utr$ensembl_gene_id %in% lin41_genesq4_exclusive,]
+temp3<-seq3utr[seq3utr$ensembl_gene_id %in% oma1_genesq4_exclusive,]
+boxplot(temp2$`Lin-41 IP` ~ temp2$loedige)
+#boxplot(temp3$`Oma-1 IP` ~ temp3$loedige)
+
+boxplot(seq3utr$`Lin-41 IP` ~ seq3utr$loedige)
+# boxplot(seq3utr$`Lin-41 IP` ~ seq3utr$taw)
+ 
+# boxplot(seq3utr$`Oma-1 IP` ~ seq3utr$loedige)
+# boxplot(seq3utr$`Lin-41 IP` ~ seq3utr$taw)
+
+seq3utr[seq3utr$external_gene_name %in% c("spn-4", "meg-1", "orc-1", "mex-3", "cyb-3", "trcs-1","zyg-11","lin-29"),]
+ 
+x<-matchPWM(lin41_consensusMatrix,seq3utrBS[["W03C9.4c"]],min.score="75%",with.score=T)
+mcols(x)$score/maxScore(lin41_consensusMatrix)
+
+#5p
+idx<-match(seq5utr$ensembl_gene_id,rownames(res_dds87q4))
+seq5utr$external_gene_name<-res_dds87q4[idx,]$external_name
+seq5utr$`Lin-41 IP` <- res_dds87q4[idx,]$`Lin-41 IP`
+seq5utr$`Oma-1 IP` <- res_dds87q4[idx,]$`Oma-1 IP`
+
+seq5utr[seq5utr$external_gene_name %in% c("spn-4", "meg-1", "orc-1", "mex-3", "cyb-3", "trcs-1","zyg-11","lin-29"),]
+```
+
 ## Search for OMA-1 and LIN-41 Motifs in 5' UTRs 
 ```{r fiveUTR,eval=T}
-#clean up UTR sequences
-seq5utr<-seq5utr[seq5utr$`5utr`!="Sequence unavailable",]
-seq5utr<-seq5utr[nchar(seq5utr$`5utr`) >=8,]  # get rid of really short 3'UTRs
 
-# add geneid to dataframe
-summary(idx<-match(seq5utr$ensembl_transcript_id,expressed_transcripts$ensembl_transcript_id))
-seq5utr$ensembl_gene_id<-expressed_transcripts[idx,"ensembl_gene_id"]
-sum(duplicated(paste0(seq5utr$`5utr`,seq5utr$ensembl_transcript_id)))
-sum(duplicated(paste0(seq5utr$`5utr`,seq5utr$ensembl_gene_id)))
-seq5utr<-seq5utr[!duplicated(paste0(seq5utr$`5utr`,seq5utr$ensembl_gene_id)),]
-
-seq5utrBS<-DNAStringSet(seq5utr$`5utr`)
-names(seq5utrBS)<-seq5utr$ensembl_transcript_id
-summary(width(seq5utrBS))
-seq5utr<-seq5utr[,-1]  #drop sequence from dataframe
-
-#Count TAW motif and RNACompete Motif in each transcript
-seq5utr$taw<-vcountPattern("TAW",seq5utrBS,fixed=FALSE)
-table(as.logical(seq5utr$taw))
 
 #Count RNAcompete motif in each transcript
 seq5utr$loedige<-unlist(lapply(seq5utrBS,function(x) countPWM(lin41_consensusMatrix,x,min.score="90%")))
@@ -588,6 +867,100 @@ rownames(x)<-c("TAW motif enrichment in 5' UTR of Oma1 Enriched Genes",
 knitr::kable(x)
 ```
 
+```{r match_5p,eval=F}
+
+#5p
+idx<-match(seq5utr$ensembl_gene_id,rownames(res_dds87q4))
+seq5utr$external_gene_name<-res_dds87q4[idx,]$external_name
+seq5utr$`Lin-41 IP` <- res_dds87q4[idx,]$`Lin-41 IP`
+seq5utr$`Oma-1 IP` <- res_dds87q4[idx,]$`Oma-1 IP`
+
+seq5utr[seq5utr$external_gene_name %in% c("spn-4", "meg-1", "orc-1", "mex-3", "cyb-3", "trcs-1","zyg-11","lin-29"),]
+
+x<-matchPWM(lin41_consensusMatrix,seq3utrBS[["W03C9.4a"]],min.score="75%",with.score=T)
+mcols(x)$score/maxScore(lin41_consensusMatrix)
+```
+
+## Figure 5D and Sup2 - Coverage in GViz
+```{r Gviz,eval=T}
+
+txdb<-AnnotationDbi::loadDb(file="~/test.db")
+options(ucscChromosomeNames=FALSE)
+
+plotUTR<-function(common_name,ylim=20) {
+gene<-anno87[grep(common_name,anno87$external_gene_name),"ensembl_gene_id"]
+
+utr87<-getBM(filters="ensembl_gene_id",values=gene,mart=ensembl_87,
+             attributes=c("ensembl_gene_id","5_utr_start","3_utr_start","3_utr_end","chromosome_name") )
+
+utr87<-utr87[!is.na(utr87$`3_utr_start`),]
+if (nrow(utr87) > 1) { utr87<-utr87[which.max(abs(utr87$`3_utr_end`-utr87$`3_utr_start`)),] }
+
+utr87_start<-utr87$`3_utr_start`
+utr87_end<-utr87$`3_utr_end`
+utr87_chr<-utr87$`chromosome_name`
+#utr87_5start<-utr87$`5_utr_start`
+utr87_5start<-max(getBM(filters="ensembl_gene_id",values=gene,mart=ensembl_87, attributes=c("ensembl_gene_id","5_utr_start") )$`5_utr_start`,na.rm=TRUE)
+utr87_midpoint<-round(mean(c(utr87$`3_utr_start`,utr87$`3_utr_end`)),0)
+
+(utr87_seq<-getSeq(BSgenome.Celegans.UCSC.ce11,utr87_chr,start=min(utr87_start,utr87_end),end=max(utr87_start,utr87_end)))
+
+#utr87<-getBM(filters="ensembl_gene_id",values=gene, attributes=c("ensembl_gene_id","5_utr_start"), mart=ensembl_87)
+#utr87<-utr87[!is.na(utr87$`5_utr_start`),]
+#utr87_5start<-utr87$`5_utr_start`
+
+(flip<- utr87_5start > utr87_end) #sets to FALSE on positive strand
+
+seq <- if (flip) reverseComplement(utr87_seq) else utr87_seq
+
+x<-matchPWM(lin41_consensusMatrix,seq,with.score=T)
+
+mcols(x)$score<-round(mcols(x)$score/maxScore(lin41_consensusMatrix),2)
+#x<-x[mcols(x)$score >=0.85]
+
+(hit_starts<-if (flip) utr87_start + length(seq) - end(x) else utr87_start+start(x))
+(hit_ends <-if (flip) utr87_start + length(seq) - start(x) else utr87_start+end(x))
+
+gr<-GRanges(seqnames=utr87_chr,IRanges(start=hit_starts,end=hit_ends),strand=ifelse(flip,"-","+"))
+gr$score<-mcols(x)$score
+atrack <- AnnotationTrack(gr, name = "lin41 BS",id=as.character(gr$score))
+
+y<-c(0,35000)
+
+dT1 <- DataTrack(range = "LIN-41_LysateRZ_q4_scaled.bigWig", genome = "ce11",type = "histogram", chromosome =utr87_chr, name="LysRZ",col = "#E69F00")
+dT2 <- DataTrack(range = "OMA-1_LysateRZ_q4_scaled.bigWig", genome = "ce11",type = "histogram", chromosome = utr87_chr, name="LysRZ",col = "#E69F00")
+dT3 <- DataTrack(range = "LIN-41_IP-1_q4_scaled.bigWig", genome = "ce11",type = "histogram", chromosome = utr87_chr, name = "LIN-41 IP1",col="#D55E00")
+dT4 <- DataTrack(range = "LIN-41_IP-2_q4_scaled.bigWig", genome = "ce11",type = "histogram", chromosome = utr87_chr, name = "LIN-41 IP1",col="#D55E00")
+dT5 <- DataTrack(range = "OMA-1_IP-1_q4_scaled.bigWig", genome = "ce11",type = "histogram", chromosome = utr87_chr, name = "OMA-1 IP1",col = "#0072B2")
+dT6 <- DataTrack(range = "OMA-1_IP-2_q4_scaled.bigWig", genome = "ce11",type = "histogram", chromosome = utr87_chr, name = "OMA-1 IP1",col = "#0072B2")
+
+(start<-ifelse(flip,utr87_start,utr87_5start))
+(end<-ifelse(flip,utr87_5start,utr87_end))
+
+gtrack <- GenomeAxisTrack()
+txTr <- GeneRegionTrack(txdb, chromosome =  utr87_chr, start = utr87_midpoint-1, end = utr87_midpoint+1)
+#strack <- SequenceTrack(ce11, chromosome =  utr87_chr)
+
+#data tracks
+#alTrack <- AlignmentsTrack("Documents/Notebook/GCD Consultant/Greenste/3923IP-1_S17.bam", isPaired = FALSE)
+
+data(twoGroups)
+head(twoGroups)
+
+paddedLog2<-function(x) {log2(x+1)}
+
+plotTracks(list(gtrack,dT1,dT2,dT3,dT4,dT5,dT6,txTr,atrack), from=start-25, to = end+1500, 
+       #    extend.left = 0.1, extend.right = 0.1, 
+           transformation=paddedLog2, reverseStrand = TRUE,
+           cex = 0.8, featureAnnotation = "id", fontcolor.feature = "darkblue",
+           complement=flip,add53=TRUE, type = c("a"),ylim=c(0,ylim))
+}
+
+plotUTR("spn-4",ylim=20)
+plotUTR("lin-29",ylim=10)
+```
+
+
 
 ## MEME de novo explore UTR's of LIN-41 exclusive set
 
@@ -596,8 +969,11 @@ knitr::kable(x)
 length(lin41q4_exclusive_3p_BS<-seq3utrBS[seq3utr[seq3utr$ensembl_gene_id %in% lin41q4_genes_exclusive,"ensembl_transcript_id"]])
 length(lin41_3p_BS<-seq3utrBS[seq3utr[seq3utr$ensembl_gene_id %in% lin41q4_genes,"ensembl_transcript_id"]])
 
-motifSet_lin41_3utr_exclusive <- runMEME(lin41q4_exclusive_3p_BS, binary="/usr/ngs/bin/meme/bin/meme",arguments=list("-nmotifs"=3,"-maxsize"=1e16))
-motifSet_lin41_3utr_full <- runMEME(lin41_3p_BS, binary="/usr/ngs/bin/meme/bin/meme",arguments=list("-nmotifs"=3,"-maxsize"=1e16,,"-w"=7))
+motifSet_lin41_3utr_exclusive <- runMEME(lin41q4_exclusive_3p_BS, binary="/usr/ngs/bin/meme/bin/meme",
+                                         arguments=list("-nmotifs"=5,"-maxsize"=1e16,"-minw"=5,"-maxw"=16))
+
+motifSet_lin41_3utr_full <- runMEME(lin41_3p_BS, binary="/usr/ngs/bin/meme/bin/meme",
+                                    arguments=list("-nmotifs"=5,"-maxsize"=1e16,"-minw"=5,"-maxw"=16))
 save(motifSet_lin41_3utr,motifSet_lin41_3utr_full,file="motifsets_lin41_3pUTR.rdata")
 ```
 
@@ -606,24 +982,67 @@ save(motifSet_lin41_3utr,motifSet_lin41_3utr_full,file="motifsets_lin41_3pUTR.rd
 ```{r analyze_meme,eval=F}
 load("motifsets_lin41_3pUTR.rdata")
 
-motif2pfm<-function(m) {
-  temp<-consensusMatrix(m)
-  #rownames(temp)<-c("A","C","G","U")
+motif2pfm<-function(m,w=1) {
+  temp<-consensusMatrix(m)[[w]]
+  rownames(temp)<-c("A","C","G","U")
   new("pfm",mat=t(t(temp[1:4,])*1/colSums(temp[1:4,])), name="3'UTR motif")
   }
 
-plotMotifLogo(motif2pfm(motifSet_lin41_3utr_exclusive[[1]]))
+plotMotifLogo(motif2pfm(motifSet_lin41_3utr_full,2))
 
-seq5utrBS<-seq5utrBS[width(seq5utrBS)>= 8]
-names(seq5utrBS)<-paste0("seq5utr_",1:length(seq5utrBS))
-writeXStringSet(seq5utrBS,file="test5p.fasta")
-motifSet_5utr <- runMEME(seq5utrBS, binary="/usr/ngs/bin/meme/bin/meme",arguments=list("-nmotifs"=3,"-maxsize"=10000000000000000,"-w"=5))
-motifSet_5utr <- runMEME(seq5utrBS, binary="/usr/ngs/bin/meme/bin/meme",arguments=list("-nmotifs"=3,"-maxsize"=10000000000000000))
-consensusMatrix(motifSet_5utr)
+```
 
-(temp<-consensusMatrix(motifSet_5utr)[[3]])
-rownames(temp)<-c("A","C","G","U")
-plotMotifLogo(new("pfm",mat=t(t(temp[1:4,])*1/colSums(temp[1:4,])), name="3'UTR motif"))
+# polyA Dataset
+```{r polyA,eval=T,fig.height=5,fig.width=7}
+dim(pA<-read.csv("/data/greenste/lin41/merged_datasets_greenstein_gld2.csv",stringsAsFactors=F))
+pA$m.n2<-sapply(strsplit(as.character(pA$N2.tail.lengths),","),function (x) round(mean(as.numeric(x)),3))
+pA$m.gld2<-sapply(strsplit(as.character(pA$GLD2.tail.lengths),","),function (x) round(mean(as.numeric(x)),3))
+
+#subset to genes with data
+dim(pA<-pA[!(is.na(pA$N2.tail.lengths) | is.na(pA$GLD2.tail.lengths) | is.na(pA$Fold.Change)),])
+
+x<-strsplit(as.character(pA$N2.tail.lengths),",")
+y<-strsplit(as.character(pA$GLD2.tail.lengths),",")
+table(sapply(x,length))
+dim(x<-matrix(as.numeric(unlist(x)),ncol=3,byrow=T))
+table(sapply(y,length))
+dim(y<-matrix(as.numeric(unlist(y)),ncol=3,byrow=T))
+z<-as.data.frame(cbind(x,y))
+
+#Assign a class to each transcript
+table(pA$class<-ifelse(pA$Ensembl.ID %in% overlapq4,"Overlap",
+                ifelse(pA$Ensembl.ID %in% oma1q4_genes_exclusive,"OMA-1 IP Enriched",
+                ifelse(pA$Ensembl.ID %in% lin41q4_genes_exclusive,"LIN-41 IP Enriched","Not Enriched"))))
+
+# Competitive Gene Set test
+knitr::kable(camera(z,index=list(lin41=pA$class=="LIN-41 IP Enriched",
+                    oma1=pA$class=="OMA-1 IP Enriched",
+                    overlap=pA$class=="Overlap",
+                    notEnriched=pA$class=="Not Enriched"),
+                    design=cbind(Intercept=1,Group=c(0,0,0,1,1,1)),sort=F))
+
+genes_of_interest<-c("spn-4","meg-1","orc-1","oma-1","oma-2","mex-3")
+pA[pA$external_name %in% genes_of_interest,
+   c("external_name","class","N2.tail.lengths","GLD2.tail.lengths","Fold.Change","FDR","statistic")]
+
+#barcode plot
+pA$statistic<-apply(z,1,function(x) t.test(x[1:3],x[4:6])$statistic)
+barcodeplot(pA$Fold.Change,pA$class=="LIN-41 IP Enriched",
+            index2=pA$class=="OMA-1 IP Enriched",ylim.worm=c(0,2),
+            main="Change in polyA length in gld2 mutants",worm=T,
+            labels = c("Decreased polyA Tails","Increased polyA Tails"),
+            col.bars=c(cbPalette[7],cbPalette[6]))
+
+#output a pdf of this plot
+pdf(paste0("/data/greenste/lin41/barcodeplot_",ts,".pdf"),width=8,height=5)
+barcodeplot(pA$Fold.Change,pA$class=="LIN-41 IP Enriched",
+            index2=pA$class=="OMA-1 IP Enriched",ylim.worm=c(0,2),
+            main="Change in polyA length in gld2 mutants",worm=T,
+            labels = c("Decreased polyA Tails","Increased polyA Tails"),
+            col.bars=c(cbPalette[7],cbPalette[6]))
+dev.off()
+
+
 
 ```
 
@@ -689,9 +1108,9 @@ colData(kimble)
 plotPCA( DESeqTransform( kimble ),intgroup="sex")+
   ggtitle("Kimble Data") + theme_bw()
 kimble<-DESeq(kimble)
-plotMA(kimble,ylim=c(-14,14))
+#plotMA(kimble,ylim=c(-14,14))
 
-res_kimble<-results(kimble,lfcThreshold=1,contrast=c("sex","q96","q71"))
+res_kimble<-results(kimble,lfcThreshold=0,contrast=c("sex","q96","q71"))
 res_kimble<-as.data.frame(res_kimble)
 res_kimble<-res_kimble[!is.na(res_kimble$padj),]
 #res<-res[abs(res$log2FoldChange) > 2,]
@@ -734,21 +1153,25 @@ res_dds87q4$sperm_fpkm<-res_kimble[idx,"sperm_fpkm"]
 head(res_dds87q4)
 res_dds87q4[res_dds87q4$name %in% genes_of_interest,]
 
-write.csv(temp,file=paste0("enrichment_relative_to_LysateRZ_withGonadEnrichment_",ts,".csv"),quote=F)
+write.csv(res_dds87q4[expressed_genes,],file=paste0("enrichment_relative_to_LysateRZ_withGonadEnrichment_",ts,".csv"),quote=F)
+options(httr_oob_default=TRUE)
+
+#upload to university google docs
+#googlesheets::gs_upload(paste0("enrichment_relative_to_LysateRZ_withGonadEnrichment_",ts,".csv"))
 
 ```
 
 ## Oocyte Expression levels and RNP enrichment
 
-```{r oocyte_abundance,eval=T}
+```{r oocyte_abundance,eval=F}
 
-plot(log2(res_dds87q4$oma1_fpkm),log2(res_dds87q4$oocyte_fpkm),cex=0.5,pch=16)
-plot(log2(res_dds87q4$oma1_fpkm),res_dds87q4$gonadLog2FoldChange,cex=0.5,pch=16)
-abline(h=0,col="red")
+#plot(log2(res_dds87q4$oma1_fpkm),log2(res_dds87q4$oocyte_fpkm),cex=0.5,pch=16)
+#plot(log2(res_dds87q4$oma1_fpkm),res_dds87q4$gonadLog2FoldChange,cex=0.5,pch=16)
+#abline(h=0,col="red")
 
-plot(log2(res_dds87q4$lin41_fpkm),log2(res_dds87q4$oocyte_fpkm),cex=0.5,pch=16)
-plot(log2(res_dds87q4$lin41_fpkm),res_dds87q4$gonadLog2FoldChange,cex=0.5,pch=16)
-abline(h=0,col="red")
+#plot(log2(res_dds87q4$lin41_fpkm),log2(res_dds87q4$oocyte_fpkm),cex=0.5,pch=16)
+#plot(log2(res_dds87q4$lin41_fpkm),res_dds87q4$gonadLog2FoldChange,cex=0.5,pch=16)
+#abline(h=0,col="red")
 
 g3<-res_dds87q4 %>%  
   mutate(gonadLog2FoldChange=ifelse(is.na(gonadLog2FoldChange),0,gonadLog2FoldChange)) %>% # set NA's to 0 difference
@@ -779,7 +1202,7 @@ g4
 Make a barplot showing the bias for Oocyte specific genes in the IP'd RNPs.  The point here is to determine if the RNPs are loaded in a biased way with transcripts involved in oogenesis.  Spike et al originally showed this by seeing how many oogenic genes were in each "bin" of the transcripts present in the IP.  But very low abundance transcripts that are oocyte enriched may have large enrichments in the RNPs that would be lost by just binning the IP transcripts by abundance.  Probably need to look at it both ways and see if a clear trend is present.
 
 ## Barplot to show high Abundance Transcripts are more likely to be Oogenic
-```{r barplot,eval=T}
+```{r barplot,eval=F}
 #make the barplot
 res_dds87q4 %>% 
   dplyr::select(oma1_fpkm,lin41_fpkm,oocyte_fpkm) %>% 
@@ -802,25 +1225,38 @@ Rethink - these RNPs are clearly going to be loaded with oocyte genes since the 
 ```{r oocyte_volcano,eval=T}
 #try a volcano on the kimble data
 g5<-res_dds87q4  %>%  
+  dplyr::filter(!(is.na(gonadLog2FoldChange) | is.na(gonadPadj))) %>% 
   mutate(oma1_log2FC=ifelse(is.na(`Oma-1 IP`),0,`Oma-1 IP`)) %>% # set NA's to 0 difference
   ggplot(aes(x=gonadLog2FoldChange,y=(-1)*log10(gonadPadj))) +
   ggtitle("Gonad Expression Changes") + xlab("Log2 Gonad Fold Change") + ylab("-log10(gonad p-value)")+
-  geom_point(size=0.5,aes(colour = oma1_log2FC)) + 
+  geom_point(size=1.5,aes(colour = oma1_log2FC)) + 
   scale_colour_gradient2(low = "red2", mid = "white", high = "darkblue") +
-  theme_bw()
+  theme_bw() + theme(panel.grid.major=element_blank(), panel.grid.minor=element_blank()) 
 
 g6<-res_dds87q4  %>%  
+  dplyr::filter(!(is.na(gonadLog2FoldChange) | is.na(gonadPadj))) %>% 
   mutate(lin41_log2FC=ifelse(is.na(`Oma-1 IP`),0,`Lin-41 IP`)) %>% # set NA's to 0 difference
   ggplot(aes(x=gonadLog2FoldChange,y=(-1)*log10(gonadPadj))) +
   ggtitle("Gonad Expression Changes") + xlab("Log2 Gonad Fold Change") + ylab("-log10(gonad p-value)")+
-  geom_point(size=0.5,aes(colour = lin41_log2FC)) + 
+  geom_point(size=1.5,aes(colour = lin41_log2FC)) + 
   scale_colour_gradient2(low = "red2", mid = "white", high = "darkblue") +
-  theme_bw()
+  theme_bw() + theme(panel.grid.major=element_blank(), panel.grid.minor=element_blank()) 
 
 g5
 g6
 #grid.arrange(g5,g6,ncol=2)
+
+pdf(paste0("gonad_volcano_oma1_",ts,".pdf"),width=5,height=6); g5; dev.off()
+pdf(paste0("gonad_volcano_lin41_",ts,".pdf"),width=5,height=6); g6; dev.off()
+
+ggsave(file=paste0("gonad_volcano_oma1_",ts,".svg"),device = svglite::svglite,plot=g5,width=5,height=6)
+ggsave(file=paste0("gonad_volcano_lin41_",ts,".svg"),device = svglite::svglite,plot=g6,width=5,height=6)
+
 ```
 
+## Session Info
+```{r SessionInfo,eval=T}
+sessionInfo()
+```
 
 
