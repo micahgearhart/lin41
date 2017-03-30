@@ -608,7 +608,7 @@ save(seq3utr,seq5utr,expressed_transcripts,file="utr_sequences.rdata")
 ```{r threeUTR,eval=T}
 load("utr_sequences.rdata")
 
-#clean up UTR sequences
+#clean up 3' UTR sequences
 seq3utr<-seq3utr[seq3utr$`3utr`!="Sequence unavailable",]
 seq3utr<-seq3utr[nchar(seq3utr$`3utr`) >=8,]  # get rid of really short 3'UTRs
 
@@ -651,8 +651,8 @@ table(as.logical(seq5utr$taw))
 
 ```
 
-
-```{r}
+## ECDF on UA[U/A] motif in 3'UTR
+```{r edcf3p,eval=T}
 
 seq3utr$taw_ratio <-seq3utr$taw/width(seq3utrBS)
 
@@ -673,7 +673,8 @@ ks_3p_over<-round(ks.test(seq3utr[seq3utr$class=="Overlap","taw_ratio"],seq3utr[
 
 ```
 
-```{r}
+## ECDF on UA[U/A] motif in 5'UTR
+```{r ecdf5p,eval=T}
 seq5utr$taw_ratio <-seq5utr$taw/width(seq5utrBS)
 
 table(seq5utr$class<-ifelse(seq5utr$ensembl_gene_id %in% overlapq4,"Overlap",
@@ -694,7 +695,7 @@ ks_5p_over<-round(ks.test(seq5utr[seq5utr$class=="Overlap","taw_ratio"],seq5utr[
 ```
 
 ## Figure 5b Violin Plots
-```{r}
+```{r violin,eval=T}
 g9<-bind_rows(seq5utr=seq5utr, seq3utr=seq3utr, .id = "utr") %>% 
   dplyr::filter(class != "Not Enriched") %>% 
   mutate(taw_ratio=1000*taw_ratio) %>% 
@@ -717,10 +718,8 @@ ggsave(file=paste0("Figure_5B_violin_",ts,".svg"),device = svglite::svglite,plot
 ```
 
 
-
-
 ## Count RNAcompete motif in each transcript
-```{r}
+```{r loedige,eval=T}
 rnaCompeteMotif<-RNAStringSet(c("GCAAAGC","GUAAAAC","GUAUAAC","GCAUAGC","CUUUAAG"))
 temp<-consensusMatrix(rnaCompeteMotif)[1:4,]
 plotMotifLogo(new("pfm",mat=t(t(temp[1:4,])*1/colSums(temp[1:4,])), name="RNAcompeteMotif"))
@@ -733,49 +732,40 @@ table(as.logical(seq3utr$loedige))
 # Grouping by gene lets each gene only be counted once in the statistical test.  
 # If any transcript for a given gene is > 0 then the logical value is set to TRUE for that genes.
 
-temp<-seq3utr %>% group_by(ensembl_gene_id) %>% 
+temp_3utr<-seq3utr %>% group_by(ensembl_gene_id) %>% 
   summarize(taw_log=as.logical(sum(taw)),loedige_log=as.logical(sum(loedige))) %>% as.data.frame
 
-a<-sum(temp[temp$ensembl_gene_id %in% oma1q4_genes,"taw_log"])
-b<-sum(temp[!temp$ensembl_gene_id %in% oma1q4_genes,"taw_log"])
-c<-sum(oma1q4_genes %in% temp$ensembl_gene_id)
-d<-sum(expressed_genes %in% temp$ensembl_gene_id)
+#Count RNAcompete motif in each transcript
+seq5utr$loedige<-unlist(lapply(seq5utrBS,function(x) countPWM(lin41_consensusMatrix,x,min.score="85%")))
+table(as.logical(seq5utr$loedige))
 
-(x<-matrix(c(d-b-c,b,c-a,a),ncol=2))
-(oma1_taw_3p_test<-fisher.test(x))
+#oma-1 TAW
+temp_5utr<-seq5utr %>% group_by(ensembl_gene_id) %>% 
+  summarize(taw_log=as.logical(sum(taw)),loedige_log=as.logical(sum(loedige))) %>% as.data.frame
 
-#oma-1 loedige
-a<-sum(temp[temp$ensembl_gene_id %in% oma1q4_genes,"loedige_log"])
-b<-sum(temp[!temp$ensembl_gene_id %in% oma1q4_genes,"loedige_log"])
-c<-sum(oma1q4_genes %in% temp$ensembl_gene_id)
-d<-sum(expressed_genes %in% temp$ensembl_gene_id)
+fisher_test_loedige<-function(temp,gene_set) {
+   a<-sum(temp[temp$ensembl_gene_id %in% gene_set,"loedige_log"])
+   b<-sum(temp[!temp$ensembl_gene_id %in% gene_set,"loedige_log"])
+   c<-sum(gene_set %in% temp$ensembl_gene_id)
+   d<-sum(expressed_genes %in% temp$ensembl_gene_id)
+   fisher.test(matrix(c(d-b-c,b,c-a,a),ncol=2),alternative="g")
+}
 
-(x<-matrix(c(d-b-c,b,c-a,a),ncol=2))
-(oma1_loedige_3p_test<-fisher.test(x))
+oma1_3p_test<-fisher_test_loedige(temp_3utr,oma1q4_genes_exclusive)
+overlap_3p_test<-fisher_test_loedige(temp_3utr,overlapq4)
+(lin41_3p_test<-fisher_test_loedige(temp_3utr,lin41q4_genes_exclusive))
 
-#lin41 TAW
-a<-sum(temp[temp$ensembl_gene_id %in% lin41q4_genes,"taw_log"])
-b<-sum(temp[!temp$ensembl_gene_id %in% lin41q4_genes,"taw_log"])
-c<-sum(lin41q4_genes %in% temp$ensembl_gene_id)
-d<-sum(expressed_genes %in% temp$ensembl_gene_id)
+oma1_5p_test<-fisher_test_loedige(temp_5utr,oma1q4_genes_exclusive)
+overlap_5p_test<-fisher_test_loedige(temp_5utr,overlapq4)
+lin41_5p_test<-fisher_test_loedige(temp_5utr,lin41q4_genes_exclusive)
 
-(x<-matrix(c(d-b-c,b,c-a,a),ncol=2))
-(lin41_taw_3p_test<-fisher.test(x))
+## print out results from exact tests in a table for Figure 5C
 
-#lin41 loedige
-a<-sum(temp[temp$ensembl_gene_id %in% lin41q4_genes,"loedige_log"])
-b<-sum(temp[!temp$ensembl_gene_id %in% lin41q4_genes,"loedige_log"])
-c<-sum(lin41q4_genes %in% temp$ensembl_gene_id)
-d<-sum(expressed_genes %in% temp$ensembl_gene_id)
-
-(x<-matrix(c(d-b-c,b,c-a,a),ncol=2))
-(lin41_loedige_3p_test<-fisher.test(x))
-
-x<-round(data.frame(pvalue=c(oma1_taw_3p_test$p.value,oma1_loedige_3p_test$p.value,lin41_taw_3p_test$p.value,lin41_loedige_3p_test$p.value)),5)
-rownames(x)<-c("TAW motif enrichment in 3' UTR of Oma1 Enriched Genes",
-               "RNAcompete Lin-41 motif enrichment in 3' UTR of Oma1 Enriched Genes",
-               "TAW motif enrichment in 3' UTR of Lin-41 Enriched Genes",
-               "RNACompete Lin-41 motif enrichment in 3' UTR of Lin-41 Enriched Gene")
+x<-data.frame('_5p_UTR'=c(oma1_5p_test$p.value,overlap_5p_test$p.value,lin41_5p_test$p.value),
+                    '_3p_UTR'=c(oma1_3p_test$p.value,overlap_3p_test$p.value,lin41_3p_test$p.value))
+rownames(x)<-c("OMA-1 IP Selectively Enriched",
+               "Overlapping Enrichment",
+               "LIN-41 IP Selectively Enriched")
 knitr::kable(x)
 ```
 
@@ -789,14 +779,10 @@ seq3utr$`Lin-41 IP` <- res_dds87q4[idx,]$`Lin-41 IP`
 seq3utr$`Oma-1 IP` <- res_dds87q4[idx,]$`Oma-1 IP`
 temp2<-seq3utr[seq3utr$ensembl_gene_id %in% lin41_genesq4_exclusive,]
 temp3<-seq3utr[seq3utr$ensembl_gene_id %in% oma1_genesq4_exclusive,]
+#Does number of motifs correlate with Enrichment?
 boxplot(temp2$`Lin-41 IP` ~ temp2$loedige)
-#boxplot(temp3$`Oma-1 IP` ~ temp3$loedige)
-
+boxplot(temp3$`Oma-1 IP` ~ temp3$loedige)
 boxplot(seq3utr$`Lin-41 IP` ~ seq3utr$loedige)
-# boxplot(seq3utr$`Lin-41 IP` ~ seq3utr$taw)
- 
-# boxplot(seq3utr$`Oma-1 IP` ~ seq3utr$loedige)
-# boxplot(seq3utr$`Lin-41 IP` ~ seq3utr$taw)
 
 seq3utr[seq3utr$external_gene_name %in% c("spn-4", "meg-1", "orc-1", "mex-3", "cyb-3", "trcs-1","zyg-11","lin-29"),]
  
@@ -812,63 +798,8 @@ seq5utr$`Oma-1 IP` <- res_dds87q4[idx,]$`Oma-1 IP`
 seq5utr[seq5utr$external_gene_name %in% c("spn-4", "meg-1", "orc-1", "mex-3", "cyb-3", "trcs-1","zyg-11","lin-29"),]
 ```
 
-## Search for OMA-1 and LIN-41 Motifs in 5' UTRs 
-```{r fiveUTR,eval=T}
-
-
-#Count RNAcompete motif in each transcript
-seq5utr$loedige<-unlist(lapply(seq5utrBS,function(x) countPWM(lin41_consensusMatrix,x,min.score="90%")))
-table(as.logical(seq5utr$loedige))
-
-#oma-1 TAW
-temp<-seq5utr %>% group_by(ensembl_gene_id) %>% 
-  summarize(taw_log=as.logical(sum(taw)),loedige_log=as.logical(sum(loedige))) %>% as.data.frame
-
-a<-sum(temp[temp$ensembl_gene_id %in% oma1q4_genes,"taw_log"])
-b<-sum(temp[!temp$ensembl_gene_id %in% oma1q4_genes,"taw_log"])
-c<-sum(oma1q4_genes %in% temp$ensembl_gene_id)
-d<-sum(expressed_genes %in% temp$ensembl_gene_id)
-
-(x<-matrix(c(d-b-c,b,c-a,a),ncol=2))
-(oma1_taw_5p_test<-fisher.test(x))
-
-#oma-1 loedige
-a<-sum(temp[temp$ensembl_gene_id %in% oma1q4_genes,"loedige_log"])
-b<-sum(temp[!temp$ensembl_gene_id %in% oma1q4_genes,"loedige_log"])
-c<-sum(oma1q4_genes %in% temp$ensembl_gene_id)
-d<-sum(expressed_genes %in% temp$ensembl_gene_id)
-
-(x<-matrix(c(d-b-c,b,c-a,a),ncol=2))
-(oma1_loedige_5p_test<-fisher.test(x))
-
-#lin41 TAW
-a<-sum(temp[temp$ensembl_gene_id %in% lin41q4_genes,"taw_log"])
-b<-sum(temp[!temp$ensembl_gene_id %in% lin41q4_genes,"taw_log"])
-c<-sum(lin41q4_genes %in% temp$ensembl_gene_id)
-d<-sum(expressed_genes %in% temp$ensembl_gene_id)
-
-(x<-matrix(c(d-b-c,b,c-a,a),ncol=2))
-(lin41_taw_5p_test<-fisher.test(x))
-
-#lin41 loedige
-a<-sum(temp[temp$ensembl_gene_id %in% lin41q4_genes,"loedige_log"])
-b<-sum(temp[!temp$ensembl_gene_id %in% lin41q4_genes,"loedige_log"])
-c<-sum(lin41q4_genes %in% temp$ensembl_gene_id)
-d<-sum(expressed_genes %in% temp$ensembl_gene_id)
-
-(x<-matrix(c(d-b-c,b,c-a,a),ncol=2))
-(lin41_loedige_5p_test<-fisher.test(x))
-
-x<-round(data.frame(pvalue=c(oma1_taw_5p_test$p.value,oma1_loedige_5p_test$p.value,lin41_taw_5p_test$p.value,lin41_loedige_5p_test$p.value)),5)
-rownames(x)<-c("TAW motif enrichment in 5' UTR of Oma1 Enriched Genes",
-               "RNAcompete Lin-41 motif enrichment in 5' UTR of Oma1 Enriched Genes",
-               "TAW motif enrichment in 5' UTR of Lin-41 Enriched Genes",
-               "RNACompete Lin-41 motif enrichment in 5' UTR of Lin-41 Enriched Gene")
-knitr::kable(x)
-```
-
+## Look for RNAcompete motif in 5' of Lin-29
 ```{r match_5p,eval=F}
-
 #5p
 idx<-match(seq5utr$ensembl_gene_id,rownames(res_dds87q4))
 seq5utr$external_gene_name<-res_dds87q4[idx,]$external_name
@@ -884,6 +815,8 @@ mcols(x)$score/maxScore(lin41_consensusMatrix)
 ## Figure 5D and Sup2 - Coverage in GViz
 ```{r Gviz,eval=T}
 
+ensembl_87 = useMart(biomart="ENSEMBL_MART_ENSEMBL", host="dec2016.archive.ensembl.org", path="/biomart/martservice",dataset="celegans_gene_ensembl")
+  
 txdb<-AnnotationDbi::loadDb(file="~/test.db")
 options(ucscChromosomeNames=FALSE)
 
@@ -1022,11 +955,12 @@ knitr::kable(camera(z,index=list(lin41=pA$class=="LIN-41 IP Enriched",
                     design=cbind(Intercept=1,Group=c(0,0,0,1,1,1)),sort=F))
 
 genes_of_interest<-c("spn-4","meg-1","orc-1","oma-1","oma-2","mex-3")
-pA[pA$external_name %in% genes_of_interest,
-   c("external_name","class","N2.tail.lengths","GLD2.tail.lengths","Fold.Change","FDR","statistic")]
+
+#t.test
+pA$statistic<-apply(z,1,function(x) t.test(x[4:6],x[1:3])$statistic)
+pA[pA$external_name %in% genes_of_interest,c("external_name","class","N2.tail.lengths","GLD2.tail.lengths","Fold.Change","FDR","statistic")]
 
 #barcode plot
-pA$statistic<-apply(z,1,function(x) t.test(x[1:3],x[4:6])$statistic)
 barcodeplot(pA$Fold.Change,pA$class=="LIN-41 IP Enriched",
             index2=pA$class=="OMA-1 IP Enriched",ylim.worm=c(0,2),
             main="Change in polyA length in gld2 mutants",worm=T,
