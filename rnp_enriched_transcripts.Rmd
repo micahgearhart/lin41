@@ -53,13 +53,14 @@ cbPalette2<-c("#cbc9e2","#9e9ac8","#6a51a3", "#fdbe85","#fd8d3c","#d94701",
           "#56B4E9", "#009E73","#F0E442", "#0072B2", "black","red","green")
 
 wls<- function(x) { paste0(seqnames(x),":",start(x),"-",end(x))}
+source("barcodeplot.R")
 ```
 
 ## Download Annotation files for Ensembl 87
 ```{r biomaRt, eval=F}
 
-ensembl_87 = useMart(biomart="ENSEMBL_MART_ENSEMBL", host="useast.ensembl.org", path="/biomart/martservice",dataset="celegans_gene_ensembl")
-txdb<-makeTxDbFromBiomart(biomart="ENSEMBL_MART_ENSEMBL",host="useast.ensembl.org",dataset="celegans_gene_ensembl")
+ensembl_87 = useMart(biomart="ENSEMBL_MART_ENSEMBL", host="dec2016.archive.ensembl.org", path="/biomart/martservice",dataset="celegans_gene_ensembl")
+txdb<-makeTxDbFromBiomart(biomart="ENSEMBL_MART_ENSEMBL",host="dec2016.archive.ensembl.org",dataset="celegans_gene_ensembl")
 
 #tx87<-transcriptsBy(txdb, "gene")
 ens87<-exonsBy(txdb,by="gene")
@@ -68,17 +69,20 @@ ens87<-exonsBy(txdb,by="gene")
 anno87<-getBM(filters="ensembl_gene_id",values=names(ens87), attributes=c("ensembl_gene_id","wikigene_name","transcript_biotype","external_gene_name"), mart=ensembl_87)
 
 save(ens87,anno87,file="ens87.rdata")
-AnnotationDbi::saveDb(txdb,file="~/test.db")
+AnnotationDbi::saveDb(txdb,file="~/ens87_celegans_txdb.db")
 ```
 
 
 ## Count 2x for Ensembl 87
 ```{r summarizeOverlaps, eval=F}
 load("ens87.rdata")
+
+qfilter<-4
+
 mapq_filter <- function(features, reads, ignore.strand = FALSE, inter.feature=TRUE)
 {
     require(GenomicAlignments) # needed for parallel evaluation
-    Union(features, reads[mcols(reads)$mapq >= 4],
+    Union(features, reads[mcols(reads)$mapq >= qfilter],
           ignore.strand, inter.feature)
 }
 
@@ -186,14 +190,30 @@ ggsave(file=paste0("pca_",ts,".svg"),device = svglite::svglite,plot=pca2,width=8
 ## Create bigWig files using DESeq2 normalization Size Factors
 
 ```{r bigWigs,eval=F}
-bam2bw<-function(x) {
+
+bam2bw<-function(x,filter=TRUE) {
 for (i in seq_along(1:ncol(x))) {
 print(colData(x)[i,"filename"])
-temp.cov<-coverage(readGAlignments(colData(x)[i,"filename"],param=param),weight=1/colData(x)[i,"sizeFactor"])
-export(temp.cov,paste0(colnames(x)[i],"_q4_scaled.bigWig"))
+temp<-readGAlignments(colData(x)[i,"filename"],param=param)
+if(filter) {
+temp.cov<-coverage(temp[mcols(temp)$mapq >= qfilter],weight=1/colData(x)[i,"sizeFactor"])
+export(temp.cov,paste0(colnames(x)[i],"_q",qfilter,"_scaled.bigWig"))
+print(paste0(colnames(x)[i],"_q",qfilter,"_scaled.bigWig"))
+       
+} else {
+temp.cov<-coverage(temp,weight=1/colData(x)[i,"sizeFactor"])
+export(temp.cov,paste0(colnames(x)[i],"_scaled.bigWig"))
+print(paste0(colnames(x)[i],"_scaled.bigWig"))
+
+}
     }
 }
-bam2bw(dds87q4)
+
+#dds87q4 <- estimateSizeFactors(dds87q4)
+#bam2bw(dds87q4,T)
+dds87 <- estimateSizeFactors(dds87)
+bam2bw(dds87,F)
+
 ```
 
 ## Run Differential Expression on both dds objects
@@ -605,7 +625,7 @@ save(seq3utr,seq5utr,expressed_transcripts,file="utr_sequences.rdata")
 ```
 
 # Figure 5B -- Search for UA[U/A] Motif among enriched transcripts
-```{r threeUTR,eval=T}
+```{r utr_analysis,eval=T}
 load("utr_sequences.rdata")
 
 #clean up 3' UTR sequences
@@ -645,9 +665,15 @@ names(seq5utrBS)<-seq5utr$ensembl_transcript_id
 summary(width(seq5utrBS))
 seq5utr<-seq5utr[,-1]  #drop sequence from dataframe
 
-#Count TAW motif and RNACompete Motif in each transcript
+#Count TAW motif 
 seq5utr$taw<-vcountPattern("TAW",seq5utrBS,fixed=FALSE)
 table(as.logical(seq5utr$taw))
+
+#base composition
+colSums(alphabetFrequency(seq3utrBS))[1:4]/sum(colSums(alphabetFrequency(seq3utrBS))[1:4])
+
+colSums(alphabetFrequency(seq5utrBS))[1:4]/sum(colSums(alphabetFrequency(seq5utrBS))[1:4])
+
 
 ```
 
@@ -813,11 +839,11 @@ mcols(x)$score/maxScore(lin41_consensusMatrix)
 ```
 
 ## Figure 5D and Sup2 - Coverage in GViz
-```{r Gviz,eval=T}
+```{r Gviz,eval=F}
 
 ensembl_87 = useMart(biomart="ENSEMBL_MART_ENSEMBL", host="dec2016.archive.ensembl.org", path="/biomart/martservice",dataset="celegans_gene_ensembl")
   
-txdb<-AnnotationDbi::loadDb(file="~/test.db")
+txdb<-AnnotationDbi::loadDb(file="~/ens87_celegans_txdb.db")
 options(ucscChromosomeNames=FALSE)
 
 plotUTR<-function(common_name,ylim=20) {
@@ -927,7 +953,7 @@ plotMotifLogo(motif2pfm(motifSet_lin41_3utr_full,2))
 
 # polyA Dataset
 ```{r polyA,eval=T,fig.height=5,fig.width=7}
-dim(pA<-read.csv("/data/greenste/lin41/merged_datasets_greenstein_gld2.csv",stringsAsFactors=F))
+dim(pA<-read.csv("merged_datasets_greenstein_gld2.csv",stringsAsFactors=F))
 pA$m.n2<-sapply(strsplit(as.character(pA$N2.tail.lengths),","),function (x) round(mean(as.numeric(x)),3))
 pA$m.gld2<-sapply(strsplit(as.character(pA$GLD2.tail.lengths),","),function (x) round(mean(as.numeric(x)),3))
 
@@ -960,16 +986,18 @@ genes_of_interest<-c("spn-4","meg-1","orc-1","oma-1","oma-2","mex-3")
 pA$statistic<-apply(z,1,function(x) t.test(x[4:6],x[1:3])$statistic)
 pA[pA$external_name %in% genes_of_interest,c("external_name","class","N2.tail.lengths","GLD2.tail.lengths","Fold.Change","FDR","statistic")]
 
+(q<-c(mean(pA$Fold.Change)-sd(pA$Fold.Change),mean(pA$Fold.Change)+sd(pA$Fold.Change)))
+(q<-quantile(pA$Fold.Change,c(0.25,0.75)))
 #barcode plot
-barcodeplot(pA$Fold.Change,pA$class=="LIN-41 IP Enriched",
+barcodeplot(pA$Fold.Change,pA$class=="OMA-1 IP Enriched",quantiles=c(-2,2)
             index2=pA$class=="OMA-1 IP Enriched",ylim.worm=c(0,2),
             main="Change in polyA length in gld2 mutants",worm=T,
             labels = c("Decreased polyA Tails","Increased polyA Tails"),
             col.bars=c(cbPalette[7],cbPalette[6]))
 
 #output a pdf of this plot
-pdf(paste0("/data/greenste/lin41/barcodeplot_",ts,".pdf"),width=8,height=5)
-barcodeplot(pA$Fold.Change,pA$class=="LIN-41 IP Enriched",
+pdf(paste0("barcodeplot_",ts,".pdf"),width=8,height=5)
+barcodeplot(pA$Fold.Change,pA$class=="LIN-41 IP Enriched",quantiles=c(-2,2),
             index2=pA$class=="OMA-1 IP Enriched",ylim.worm=c(0,2),
             main="Change in polyA length in gld2 mutants",worm=T,
             labels = c("Decreased polyA Tails","Increased polyA Tails"),
