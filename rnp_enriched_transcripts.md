@@ -40,14 +40,15 @@ cbPalette2<-c("#cbc9e2","#9e9ac8","#6a51a3", "#fdbe85","#fd8d3c","#d94701",
           "#56B4E9", "#009E73","#F0E442", "#0072B2", "black","red","green")
 
 wls<- function(x) { paste0(seqnames(x),":",start(x),"-",end(x))}
+source("barcodeplot.R")
 ```
 
 Download Annotation files for Ensembl 87
 ----------------------------------------
 
 ``` r
-ensembl_87 = useMart(biomart="ENSEMBL_MART_ENSEMBL", host="useast.ensembl.org", path="/biomart/martservice",dataset="celegans_gene_ensembl")
-txdb<-makeTxDbFromBiomart(biomart="ENSEMBL_MART_ENSEMBL",host="useast.ensembl.org",dataset="celegans_gene_ensembl")
+ensembl_87 = useMart(biomart="ENSEMBL_MART_ENSEMBL", host="dec2016.archive.ensembl.org", path="/biomart/martservice",dataset="celegans_gene_ensembl")
+txdb<-makeTxDbFromBiomart(biomart="ENSEMBL_MART_ENSEMBL",host="dec2016.archive.ensembl.org",dataset="celegans_gene_ensembl")
 
 #tx87<-transcriptsBy(txdb, "gene")
 ens87<-exonsBy(txdb,by="gene")
@@ -56,7 +57,7 @@ ens87<-exonsBy(txdb,by="gene")
 anno87<-getBM(filters="ensembl_gene_id",values=names(ens87), attributes=c("ensembl_gene_id","wikigene_name","transcript_biotype","external_gene_name"), mart=ensembl_87)
 
 save(ens87,anno87,file="ens87.rdata")
-AnnotationDbi::saveDb(txdb,file="~/test.db")
+AnnotationDbi::saveDb(txdb,file="~/ens87_celegans_txdb.db")
 ```
 
 Count 2x for Ensembl 87
@@ -64,10 +65,13 @@ Count 2x for Ensembl 87
 
 ``` r
 load("ens87.rdata")
+
+qfilter<-4
+
 mapq_filter <- function(features, reads, ignore.strand = FALSE, inter.feature=TRUE)
 {
     require(GenomicAlignments) # needed for parallel evaluation
-    Union(features, reads[mcols(reads)$mapq >= 4],
+    Union(features, reads[mcols(reads)$mapq >= qfilter],
           ignore.strand, inter.feature)
 }
 
@@ -225,14 +229,28 @@ Create bigWig files using DESeq2 normalization Size Factors
 -----------------------------------------------------------
 
 ``` r
-bam2bw<-function(x) {
+bam2bw<-function(x,filter=TRUE) {
 for (i in seq_along(1:ncol(x))) {
 print(colData(x)[i,"filename"])
-temp.cov<-coverage(readGAlignments(colData(x)[i,"filename"],param=param),weight=1/colData(x)[i,"sizeFactor"])
-export(temp.cov,paste0(colnames(x)[i],"_q4_scaled.bigWig"))
+temp<-readGAlignments(colData(x)[i,"filename"],param=param)
+if(filter) {
+temp.cov<-coverage(temp[mcols(temp)$mapq >= qfilter],weight=1/colData(x)[i,"sizeFactor"])
+export(temp.cov,paste0(colnames(x)[i],"_q",qfilter,"_scaled.bigWig"))
+print(paste0(colnames(x)[i],"_q",qfilter,"_scaled.bigWig"))
+       
+} else {
+temp.cov<-coverage(temp,weight=1/colData(x)[i,"sizeFactor"])
+export(temp.cov,paste0(colnames(x)[i],"_scaled.bigWig"))
+print(paste0(colnames(x)[i],"_scaled.bigWig"))
+
+}
     }
 }
-bam2bw(dds87q4)
+
+#dds87q4 <- estimateSizeFactors(dds87q4)
+#bam2bw(dds87q4,T)
+dds87 <- estimateSizeFactors(dds87)
+bam2bw(dds87,F)
 ```
 
 Run Differential Expression on both dds objects
@@ -1212,7 +1230,7 @@ summary(width(seq5utrBS))
 ``` r
 seq5utr<-seq5utr[,-1]  #drop sequence from dataframe
 
-#Count TAW motif and RNACompete Motif in each transcript
+#Count TAW motif 
 seq5utr$taw<-vcountPattern("TAW",seq5utrBS,fixed=FALSE)
 table(as.logical(seq5utr$taw))
 ```
@@ -1220,6 +1238,21 @@ table(as.logical(seq5utr$taw))
     ## 
     ## FALSE  TRUE 
     ##  3556  8822
+
+``` r
+#base composition
+colSums(alphabetFrequency(seq3utrBS))[1:4]/sum(colSums(alphabetFrequency(seq3utrBS))[1:4])
+```
+
+    ##         A         C         G         T 
+    ## 0.2843569 0.1872463 0.1282607 0.4001362
+
+``` r
+colSums(alphabetFrequency(seq5utrBS))[1:4]/sum(colSums(alphabetFrequency(seq5utrBS))[1:4])
+```
+
+    ##         A         C         G         T 
+    ## 0.3008841 0.2202520 0.1846790 0.2941850
 
 ECDF on UA\[U/A\] motif in 3'UTR
 --------------------------------
@@ -1483,7 +1516,7 @@ Figure 5D and Sup2 - Coverage in GViz
 ``` r
 ensembl_87 = useMart(biomart="ENSEMBL_MART_ENSEMBL", host="dec2016.archive.ensembl.org", path="/biomart/martservice",dataset="celegans_gene_ensembl")
   
-txdb<-AnnotationDbi::loadDb(file="~/test.db")
+txdb<-AnnotationDbi::loadDb(file="~/ens87_celegans_txdb.db")
 options(ucscChromosomeNames=FALSE)
 
 plotUTR<-function(common_name,ylim=20) {
@@ -1556,51 +1589,14 @@ plotTracks(list(gtrack,dT1,dT2,dT3,dT4,dT5,dT6,txTr,atrack), from=start-25, to =
 }
 
 plotUTR("spn-4",ylim=20)
-```
-
-![](rnp_enriched_transcripts_files/figure-markdown_github/Gviz-1.png)
-
-``` r
 plotUTR("lin-29",ylim=10)
-```
-
-![](rnp_enriched_transcripts_files/figure-markdown_github/Gviz-2.png)
-
-MEME de novo explore UTR's of LIN-41 exclusive set
---------------------------------------------------
-
-``` r
-length(lin41q4_exclusive_3p_BS<-seq3utrBS[seq3utr[seq3utr$ensembl_gene_id %in% lin41q4_genes_exclusive,"ensembl_transcript_id"]])
-length(lin41_3p_BS<-seq3utrBS[seq3utr[seq3utr$ensembl_gene_id %in% lin41q4_genes,"ensembl_transcript_id"]])
-
-motifSet_lin41_3utr_exclusive <- runMEME(lin41q4_exclusive_3p_BS, binary="/usr/ngs/bin/meme/bin/meme",
-                                         arguments=list("-nmotifs"=5,"-maxsize"=1e16,"-minw"=5,"-maxw"=16))
-
-motifSet_lin41_3utr_full <- runMEME(lin41_3p_BS, binary="/usr/ngs/bin/meme/bin/meme",
-                                    arguments=list("-nmotifs"=5,"-maxsize"=1e16,"-minw"=5,"-maxw"=16))
-save(motifSet_lin41_3utr,motifSet_lin41_3utr_full,file="motifsets_lin41_3pUTR.rdata")
-```
-
-Analyze Meme findings
----------------------
-
-``` r
-load("motifsets_lin41_3pUTR.rdata")
-
-motif2pfm<-function(m,w=1) {
-  temp<-consensusMatrix(m)[[w]]
-  rownames(temp)<-c("A","C","G","U")
-  new("pfm",mat=t(t(temp[1:4,])*1/colSums(temp[1:4,])), name="3'UTR motif")
-  }
-
-plotMotifLogo(motif2pfm(motifSet_lin41_3utr_full,2))
 ```
 
 polyA Dataset
 =============
 
 ``` r
-dim(pA<-read.csv("/data/greenste/lin41/merged_datasets_greenstein_gld2.csv",stringsAsFactors=F))
+dim(pA<-read.csv("merged_datasets_greenstein_gld2.csv",stringsAsFactors=F))
 ```
 
     ## [1] 16030    24
@@ -1700,8 +1696,21 @@ pA[pA$external_name %in% genes_of_interest,c("external_name","class","N2.tail.le
     ## 7597   -4.487113 2.836879e-01  -1.279626
 
 ``` r
+(q<-c(mean(pA$Fold.Change)-sd(pA$Fold.Change),mean(pA$Fold.Change)+sd(pA$Fold.Change)))
+```
+
+    ## [1] -7.185640  1.009095
+
+``` r
+(q<-quantile(pA$Fold.Change,c(0.25,0.75)))
+```
+
+    ##        25%        75% 
+    ## -5.6228764 -0.3337454
+
+``` r
 #barcode plot
-barcodeplot(pA$Fold.Change,pA$class=="LIN-41 IP Enriched",
+barcodeplot(pA$Fold.Change,pA$class=="LIN-41 IP Enriched",quantiles=c(-2,2),
             index2=pA$class=="OMA-1 IP Enriched",ylim.worm=c(0,2),
             main="Change in polyA length in gld2 mutants",worm=T,
             labels = c("Decreased polyA Tails","Increased polyA Tails"),
@@ -1718,8 +1727,8 @@ barcodeplot(pA$Fold.Change,pA$class=="LIN-41 IP Enriched",
 
 ``` r
 #output a pdf of this plot
-pdf(paste0("/data/greenste/lin41/barcodeplot_",ts,".pdf"),width=8,height=5)
-barcodeplot(pA$Fold.Change,pA$class=="LIN-41 IP Enriched",
+pdf(paste0("barcodeplot_",ts,".pdf"),width=8,height=5)
+barcodeplot(pA$Fold.Change,pA$class=="LIN-41 IP Enriched",quantiles=c(-2,2),
             index2=pA$class=="OMA-1 IP Enriched",ylim.worm=c(0,2),
             main="Change in polyA length in gld2 mutants",worm=T,
             labels = c("Decreased polyA Tails","Increased polyA Tails"),
@@ -1818,13 +1827,8 @@ colData(kimble)
     ## SRX527966  q96 gonads Replicate 8 SRX527966.bam      q96
 
 ``` r
-plotPCA( DESeqTransform( kimble ),intgroup="sex")+
-  ggtitle("Kimble Data") + theme_bw()
-```
-
-![](rnp_enriched_transcripts_files/figure-markdown_github/analyzeKimbleData-1.png)
-
-``` r
+#plotPCA( DESeqTransform( kimble ),intgroup="sex")+
+#  ggtitle("Kimble Data") + theme_bw()
 kimble<-DESeq(kimble)
 ```
 
@@ -1881,12 +1885,8 @@ res_kimble$external_name<-anno87[idx,"external_gene_name"]
 res_kimble$type<-anno87[idx,"transcript_biotype"]
 
 
-plot(res_kimble$log2FoldChange,-1*log10(res_kimble$padj),cex=0.5,pch=16)
-```
+#plot(res_kimble$log2FoldChange,-1*log10(res_kimble$padj),cex=0.5,pch=16)
 
-![](rnp_enriched_transcripts_files/figure-markdown_github/analyzeKimbleData-2.png)
-
-``` r
 #Get average make and female fpkms
 kimble_fpkm<-as.data.frame(fpkm(kimble))
 (oocytes<-which(colData(kimble)[colnames(kimble_fpkm),"sex"]=="q71"))
@@ -2177,14 +2177,14 @@ Session Info
 sessionInfo()
 ```
 
-    ## R version 3.3.2 (2016-10-31)
+    ## R version 3.3.0 (2016-05-03)
     ## Platform: x86_64-pc-linux-gnu (64-bit)
-    ## Running under: Debian GNU/Linux 8 (jessie)
+    ## Running under: Ubuntu 14.04.4 LTS
     ## 
     ## locale:
     ##  [1] LC_CTYPE=en_US.UTF-8       LC_NUMERIC=C              
     ##  [3] LC_TIME=en_US.UTF-8        LC_COLLATE=en_US.UTF-8    
-    ##  [5] LC_MONETARY=en_US.UTF-8    LC_MESSAGES=C             
+    ##  [5] LC_MONETARY=en_US.UTF-8    LC_MESSAGES=en_US.UTF-8   
     ##  [7] LC_PAPER=en_US.UTF-8       LC_NAME=C                 
     ##  [9] LC_ADDRESS=C               LC_TELEPHONE=C            
     ## [11] LC_MEASUREMENT=en_US.UTF-8 LC_IDENTIFICATION=C       
@@ -2222,7 +2222,7 @@ sessionInfo()
     ## loaded via a namespace (and not attached):
     ##  [1] nlme_3.1-128                  matrixStats_0.51.0           
     ##  [3] httr_1.2.1                    rprojroot_1.2                
-    ##  [5] tools_3.3.2                   backports_1.0.5              
+    ##  [5] tools_3.3.0                   backports_1.0.5              
     ##  [7] R6_2.1.2                      rGADEM_2.20.0                
     ##  [9] KernSmooth_2.23-15            rpart_4.1-10                 
     ## [11] Hmisc_3.17-4                  seqLogo_1.38.0               
@@ -2242,7 +2242,7 @@ sessionInfo()
     ## [39] stringi_1.1.2                 yaml_2.1.13                  
     ## [41] zlibbioc_1.18.0               AnnotationHub_2.4.2          
     ## [43] plyr_1.8.4                    lattice_0.20-34              
-    ## [45] splines_3.3.2                 annotate_1.50.0              
+    ## [45] splines_3.3.0                 annotate_1.50.0              
     ## [47] locfit_1.5-9.1                knitr_1.15                   
     ## [49] reshape2_1.4.2                geneplotter_1.50.0           
     ## [51] futile.options_1.0.0          evaluate_0.10                

@@ -919,38 +919,6 @@ plotUTR("spn-4",ylim=20)
 plotUTR("lin-29",ylim=10)
 ```
 
-
-
-## MEME de novo explore UTR's of LIN-41 exclusive set
-
-```{r run_meme,eval=F}
-
-length(lin41q4_exclusive_3p_BS<-seq3utrBS[seq3utr[seq3utr$ensembl_gene_id %in% lin41q4_genes_exclusive,"ensembl_transcript_id"]])
-length(lin41_3p_BS<-seq3utrBS[seq3utr[seq3utr$ensembl_gene_id %in% lin41q4_genes,"ensembl_transcript_id"]])
-
-motifSet_lin41_3utr_exclusive <- runMEME(lin41q4_exclusive_3p_BS, binary="/usr/ngs/bin/meme/bin/meme",
-                                         arguments=list("-nmotifs"=5,"-maxsize"=1e16,"-minw"=5,"-maxw"=16))
-
-motifSet_lin41_3utr_full <- runMEME(lin41_3p_BS, binary="/usr/ngs/bin/meme/bin/meme",
-                                    arguments=list("-nmotifs"=5,"-maxsize"=1e16,"-minw"=5,"-maxw"=16))
-save(motifSet_lin41_3utr,motifSet_lin41_3utr_full,file="motifsets_lin41_3pUTR.rdata")
-```
-
-
-## Analyze Meme findings
-```{r analyze_meme,eval=F}
-load("motifsets_lin41_3pUTR.rdata")
-
-motif2pfm<-function(m,w=1) {
-  temp<-consensusMatrix(m)[[w]]
-  rownames(temp)<-c("A","C","G","U")
-  new("pfm",mat=t(t(temp[1:4,])*1/colSums(temp[1:4,])), name="3'UTR motif")
-  }
-
-plotMotifLogo(motif2pfm(motifSet_lin41_3utr_full,2))
-
-```
-
 # polyA Dataset
 ```{r polyA,eval=T,fig.height=5,fig.width=7}
 dim(pA<-read.csv("merged_datasets_greenstein_gld2.csv",stringsAsFactors=F))
@@ -988,8 +956,9 @@ pA[pA$external_name %in% genes_of_interest,c("external_name","class","N2.tail.le
 
 (q<-c(mean(pA$Fold.Change)-sd(pA$Fold.Change),mean(pA$Fold.Change)+sd(pA$Fold.Change)))
 (q<-quantile(pA$Fold.Change,c(0.25,0.75)))
+  
 #barcode plot
-barcodeplot(pA$Fold.Change,pA$class=="OMA-1 IP Enriched",quantiles=c(-2,2)
+barcodeplot(pA$Fold.Change,pA$class=="LIN-41 IP Enriched",quantiles=c(-2,2),
             index2=pA$class=="OMA-1 IP Enriched",ylim.worm=c(0,2),
             main="Change in polyA length in gld2 mutants",worm=T,
             labels = c("Decreased polyA Tails","Increased polyA Tails"),
@@ -1067,8 +1036,8 @@ kimble$sex<-factor(substr(kimble$title,2,4))
 #sperm [fem-3(q96)] or oocytes [fog-2(q71)]
 design(kimble)<-(~sex)
 colData(kimble)
-plotPCA( DESeqTransform( kimble ),intgroup="sex")+
-  ggtitle("Kimble Data") + theme_bw()
+#plotPCA( DESeqTransform( kimble ),intgroup="sex")+
+#  ggtitle("Kimble Data") + theme_bw()
 kimble<-DESeq(kimble)
 #plotMA(kimble,ylim=c(-14,14))
 
@@ -1085,7 +1054,7 @@ res_kimble$external_name<-anno87[idx,"external_gene_name"]
 res_kimble$type<-anno87[idx,"transcript_biotype"]
 
 
-plot(res_kimble$log2FoldChange,-1*log10(res_kimble$padj),cex=0.5,pch=16)
+#plot(res_kimble$log2FoldChange,-1*log10(res_kimble$padj),cex=0.5,pch=16)
 
 #Get average make and female fpkms
 kimble_fpkm<-as.data.frame(fpkm(kimble))
