@@ -153,13 +153,13 @@ g2<-tidyr::gather(counts87q4,sample,counts,-biotype) %>%
 g1
 ```
 
-![](rnp_enriched_transcripts_files/figure-markdown_github/eda-1.png)
+![](figures/rnp-eda-1.png)
 
 ``` r
 g2
 ```
 
-![](rnp_enriched_transcripts_files/figure-markdown_github/eda-2.png)
+![](figures/rnp-eda-2.png)
 
 ``` r
 #grid.arrange(g1,g2,ncol=1)
@@ -211,7 +211,7 @@ design(dds87q4)<-(~tag)
     theme_bw() + theme(panel.grid.major=element_blank(), panel.grid.minor=element_blank()) )
 ```
 
-![](rnp_enriched_transcripts_files/figure-markdown_github/PCA-1.png)
+![](figures/rnp-PCA-1.png)
 
 ``` r
 (pca2<-plotPCA( DESeqTransform( dds87q4 ),intgroup="tag")+ ggtitle("PCA with MapQ Filter") + 
@@ -219,7 +219,7 @@ design(dds87q4)<-(~tag)
     theme_bw() + theme(panel.grid.major=element_blank(), panel.grid.minor=element_blank()) )
 ```
 
-![](rnp_enriched_transcripts_files/figure-markdown_github/PCA-2.png)
+![](figures/rnp-PCA-2.png)
 
 ``` r
 ggsave(file=paste0("pca_",ts,".svg"),device = svglite::svglite,plot=pca2,width=8.5,height=6)
@@ -339,7 +339,7 @@ plot(res_dds87q4[,2],res_dds87q4[,3],cex=0.5,pch=16,xlab="Oma-1",ylab="Lin-41",
 text(-6,5,paste0("Spearman correlation:  ",round(corr_oma_v_lin,3)),col="blue")
 ```
 
-![](rnp_enriched_transcripts_files/figure-markdown_github/quickscatter-1.png)
+![](figures/rnp-quickscatter-1.png)
 
 ``` r
 plot(res_dds87q4[,2],res_dds87q4[,1],cex=0.5,pch=16,xlab="Oma-1",ylab="Oma-1 042310",
@@ -347,7 +347,7 @@ plot(res_dds87q4[,2],res_dds87q4[,1],cex=0.5,pch=16,xlab="Oma-1",ylab="Oma-1 042
 text(-6,5,paste0("Spearman correlation:  ",round(corr_oma_v_oma,3)),col="blue")
 ```
 
-![](rnp_enriched_transcripts_files/figure-markdown_github/quickscatter-2.png)
+![](figures/rnp-quickscatter-2.png)
 
 MAKE A Master Table with MAPQ FLAG, Biotype, and mean FPKM per sample
 ---------------------------------------------------------------------
@@ -444,7 +444,7 @@ grid.newpage()
 vennplot <- draw.pairwise.venn(x1,y1,z1, c("Oma-1", "Lin-41"))
 ```
 
-![](rnp_enriched_transcripts_files/figure-markdown_github/vennDiagrams-1.png)
+![](figures/rnp-vennDiagrams-1.png)
 
 ``` r
 x2<-length(oma1q4_genes)
@@ -456,7 +456,7 @@ grid.newpage()
 vennplot <- draw.pairwise.venn(x2,y2,z2, c("Oma-1", "Lin-41"))
 ```
 
-![](rnp_enriched_transcripts_files/figure-markdown_github/vennDiagrams-2.png)
+![](figures/rnp-vennDiagrams-2.png)
 
 ``` r
 svglite::svglite(file=paste0("venn_",ts,".svg"),width=8,height=8)
@@ -502,7 +502,7 @@ s<-s+annotate("text",x=labels$`Oma-1 IP`, y=labels$`Lin-41 IP`,label=labels$exte
 s
 ```
 
-![](rnp_enriched_transcripts_files/figure-markdown_github/scatterplot-1.png)
+![](figures/rnp-scatterplot-1.png)
 
 ``` r
 pdf(paste0("scatter_",ts,".pdf"),width=8,height=8)
@@ -563,7 +563,7 @@ abline(h=2,col="red")
 abline(v=2,col="red")
 ```
 
-![](rnp_enriched_transcripts_files/figure-markdown_github/smoothScatter-1.png)
+![](figures/rnp-smoothScatter-1.png)
 
 Heatmaps of High Log2FC or High Variance Genes
 ----------------------------------------------
@@ -648,7 +648,7 @@ pheatmap(log2(dds87q4_fpkm[temp$ensembl,c(3,7,9,1,2,5,6)]),cluster_cols=F,cluste
          annotation_colors=ann_colors)
 ```
 
-![](rnp_enriched_transcripts_files/figure-markdown_github/heatmap-1.png)
+![](figures/rnp-heatmap-1.png)
 
 ``` r
 pheatmap(log2(dds87q4_fpkm[temp$ensembl,c(3,7,9,1,2,5,6)]),cluster_cols=F,cluster_rows=F,
@@ -782,7 +782,7 @@ lin41_GO<-goseq(nullp(degs_lin41,bias.data=bd),gene2cat=wb_go.list)
 
     ## 'select()' returned 1:1 mapping between keys and columns
 
-![](rnp_enriched_transcripts_files/figure-markdown_github/GO-1.png)
+![](figures/rnp-GO-1.png)
 
 ``` r
 lin41_GO[1:10,c("category","term","numDEInCat","numInCat","over_represented_pvalue")]
@@ -859,7 +859,7 @@ oma1_GO<-goseq(nullp(degs_oma1,bias.data=bd),gene2cat=wb_go.list)
 
     ## 'select()' returned 1:1 mapping between keys and columns
 
-![](rnp_enriched_transcripts_files/figure-markdown_github/GO-2.png)
+![](figures/rnp-GO-2.png)
 
 ``` r
 oma1_GO[1:10,c("category","term","numDEInCat","numInCat","over_represented_pvalue")]
@@ -939,7 +939,7 @@ overlap_GO<-goseq(nullp(degs_overlap,bias.data=bd),gene2cat=wb_go.list)
 
     ## 'select()' returned 1:1 mapping between keys and columns
 
-![](rnp_enriched_transcripts_files/figure-markdown_github/GO-3.png)
+![](figures/rnp-GO-3.png)
 
 ``` r
 overlap_GO[1:10,c("category","term","numDEInCat","numInCat","over_represented_pvalue")]
@@ -998,7 +998,7 @@ g7<-head(overlap_GO,10) %>%
 g7
 ```
 
-![](rnp_enriched_transcripts_files/figure-markdown_github/GO-4.png)
+![](figures/rnp-GO-4.png)
 
 ``` r
 pdf(paste0("GO_Overlap_",ts,".pdf"),width=3,height=3); g7; dev.off()
@@ -1037,7 +1037,7 @@ g8<-head(oma1_GO,10) %>%
 g8
 ```
 
-![](rnp_enriched_transcripts_files/figure-markdown_github/GO-5.png)
+![](figures/rnp-GO-5.png)
 
 ``` r
 pdf(paste0("GO_OMA1_",ts,".pdf"),width=3,height=3); g8; dev.off()
@@ -1076,7 +1076,7 @@ g9<-head(lin41_GO,10) %>%
 g9
 ```
 
-![](rnp_enriched_transcripts_files/figure-markdown_github/GO-6.png)
+![](figures/rnp-GO-6.png)
 
 ``` r
 pdf(paste0("GO_LIN41_",ts,".pdf"),width=3,height=3); g9; dev.off()
@@ -1282,7 +1282,7 @@ plot(y,add=TRUE,col=cbPalette[7])
 plot(z,add=TRUE,col=cbPalette[8])
 ```
 
-![](rnp_enriched_transcripts_files/figure-markdown_github/edcf3p-1.png)
+![](figures/rnp-edcf3p-1.png)
 
 ``` r
 ks_3p_oma<-round(ks.test(seq3utr[seq3utr$class=="OMA-1 IP Enriched","taw_ratio"],seq3utr[seq3utr$class=="LIN-41 IP Enriched","taw_ratio"])$p.value,5)
@@ -1327,7 +1327,7 @@ plot(y,add=TRUE,col=cbPalette[7])
 plot(z,add=TRUE,col=cbPalette[8])
 ```
 
-![](rnp_enriched_transcripts_files/figure-markdown_github/ecdf5p-1.png)
+![](figures/rnp-ecdf5p-1.png)
 
 ``` r
 ks_5p_oma<-round(ks.test(seq5utr[seq5utr$class=="OMA-1 IP Enriched","taw_ratio"],seq5utr[seq5utr$class=="LIN-41 IP Enriched","taw_ratio"])$p.value,3)
@@ -1368,7 +1368,7 @@ g9<-bind_rows(seq5utr=seq5utr, seq3utr=seq3utr, .id = "utr") %>%
 g9
 ```
 
-![](rnp_enriched_transcripts_files/figure-markdown_github/violin-1.png)
+![](figures/rnp-violin-1.png)
 
 ``` r
 ggsave(file=paste0("Figure_5B_violin_",ts,".svg"),device = svglite::svglite,plot=g9,width=5,height=6)
@@ -1383,7 +1383,7 @@ temp<-consensusMatrix(rnaCompeteMotif)[1:4,]
 plotMotifLogo(new("pfm",mat=t(t(temp[1:4,])*1/colSums(temp[1:4,])), name="RNAcompeteMotif"))
 ```
 
-![](rnp_enriched_transcripts_files/figure-markdown_github/loedige-1.png)
+![](figures/rnp-loedige-1.png)
 
 ``` r
 lin41_consensusMatrix<-consensusMatrix(DNAStringSet(rnaCompeteMotif))[1:4,]
@@ -1723,7 +1723,7 @@ barcodeplot(pA$Fold.Change,pA$class=="LIN-41 IP Enriched",quantiles=c(-2,2),
 
     ## Warning in title(...): "ylim.worm" is not a graphical parameter
 
-![](rnp_enriched_transcripts_files/figure-markdown_github/polyA-1.png)
+![](figures/rnp-polyA-1.png)
 
 ``` r
 #output a pdf of this plot
@@ -2141,13 +2141,13 @@ g6<-res_dds87q4  %>%
 g5
 ```
 
-![](rnp_enriched_transcripts_files/figure-markdown_github/oocyte_volcano-1.png)
+![](figures/rnp-oocyte_volcano-1.png)
 
 ``` r
 g6
 ```
 
-![](rnp_enriched_transcripts_files/figure-markdown_github/oocyte_volcano-2.png)
+![](figures/rnp-oocyte_volcano-2.png)
 
 ``` r
 #grid.arrange(g5,g6,ncol=2)
