@@ -1,4 +1,4 @@
-The file rnp_enriched_transcripts.Rmd contains an annotated, reproducible workflow for data presented in the following paper:
+The [rnp_enriched_transcripts.md]() file contains an annotated, reproducible workflow for the data presented in the following paper:
 
 LIN-41 and OMA ribonucleoprotein complexes mediate a translational repression-
 to-activation switch controlling oocyte meiotic maturation and the oocyte-to-
